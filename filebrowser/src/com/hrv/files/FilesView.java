@@ -28,12 +28,20 @@ public class FilesView extends View {
     private static final java.util.Set<String> TEXT_EXT = new java.util.HashSet<String>(
         java.util.Arrays.asList("txt", "log", "csv", "md", "json", "xml", "html", "htm",
         "ini", "conf", "cfg", "properties", "prop", "yml", "yaml", "sh", "py", "c", "cpp",
-        "h", "hpp", "java", "kt", "kts", "gradle", "aidl", "csv", "plist", "xml"));
+        "h", "hpp", "java", "kt", "kts", "gradle", "aidl", "plist"));
+    private static final java.util.Set<String> IMAGE_EXT = new java.util.HashSet<String>(
+        java.util.Arrays.asList("jpg", "jpeg", "png", "gif", "webp", "bmp"));
 
     static boolean isTextFile(File f) {
         String n = f.getName().toLowerCase();
         int dot = n.lastIndexOf('.');
         return dot >= 0 && TEXT_EXT.contains(n.substring(dot + 1));
+    }
+
+    static boolean isImageFile(File f) {
+        String n = f.getName().toLowerCase();
+        int dot = n.lastIndexOf('.');
+        return dot >= 0 && IMAGE_EXT.contains(n.substring(dot + 1));
     }
     private final Paint bg = new Paint();
     private final Paint pathText = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -148,6 +156,8 @@ public class FilesView extends View {
         if (f.isDirectory()) {
             cur = f;
             reload();
+        } else if (listener != null && isImageFile(f)) {
+            listener.onOpenFile(f);
         } else if (listener != null && isTextFile(f) && f.length() <= 512 * 1024) {
             listener.onOpenFile(f);
         } else {

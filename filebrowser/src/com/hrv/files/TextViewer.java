@@ -12,11 +12,13 @@ import android.view.View;
 import java.io.File;
 import java.io.FileInputStream;
 import java.util.ArrayList;
+import android.util.Log;
 
 /** Simplistic scrollable text reader for the round screen. Drag to scroll,
  *  swipe right (physical panel direction) or back button to close. */
 public class TextViewer extends View {
     public interface Listener { void onClose(); }
+    private static final String TAG = "Files";
     private Listener listener;
     public void setListener(Listener l) { listener = l; }
 
@@ -90,23 +92,22 @@ public class TextViewer extends View {
     void wrap() {
         if (!wrapPending) return;
         wrapPending = false;
+        long t0 = System.currentTimeMillis();
         float maxW = getWidth() - 44 * Math.min(getWidth(), getHeight()) / 300f;
         ArrayList<String> out = new ArrayList<String>();
         for (String raw : rawLines) {
             if (raw.length() == 0) { out.add(""); continue; }
-            StringBuilder cur = new StringBuilder();
-            for (int i = 0; i < raw.length(); i++) {
-                char ch = raw.charAt(i);
-                cur.append(ch);
-                if (textPaint.measureText(cur.toString()) > maxW) {
-                    String done = cur.substring(0, cur.length() - 1).trim();
-                    out.add(done);
-                    cur = new StringBuilder().append(ch);
-                }
+            int start = 0;
+            while (start < raw.length()) {
+                int count = textPaint.breakText(raw, start, raw.length(), true, maxW, null);
+                if (count <= 0) count = 1;
+                out.add(raw.substring(start, start + count));
+                start += count;
             }
-            out.add(cur.toString());
         }
         lines = out.toArray(new String[0]);
+        Log.i(TAG, "wrapped " + rawLines.length + " lines -> " + lines.length
+                + " in " + (System.currentTimeMillis() - t0) + "ms");
     }
 
     @Override protected void onDraw(Canvas canvas) {
