@@ -21,9 +21,11 @@ A subsequent live watch run remained stable at 85–87 bpm, 31–36 ms RMSSD, an
 ## Repository map
 
 - [`hrv-probe/`](hrv-probe/) — Android 5.1 watch application and installable APK
+- [`mic-probe/`](mic-probe/) — mic capture probe (records at all declared rates)
 - [`captures/raw_ppg.csv`](captures/raw_ppg.csv) — captured regression fixture
 - [`HRV-FINDINGS.md`](HRV-FINDINGS.md) — algorithms, evidence, failures, and limits
 - [`PACE-FINDINGS.md`](PACE-FINDINGS.md) — device and sensor-hub reverse engineering
+- [`MIC-FINDINGS.md`](MIC-FINDINGS.md) — mic capture findings (only 16 kHz is usable)
 - [`SUMMARY.md`](SUMMARY.md) — concise project findings
 - [`firmware/`](firmware/) and [`firmware-tools/`](firmware-tools/) — sensor-hub research artifacts
 
