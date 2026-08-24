@@ -25,10 +25,13 @@ A subsequent live watch run remained stable at 85–87 bpm, 31–36 ms RMSSD, an
 - [`breathe-probe/`](breathe-probe/) — cyclic-sighing stress exercise (validated protocol)
 - [`metronome-probe/`](metronome-probe/) — vibration metronome with BPM presets
 - [`radar-probe/`](radar-probe/) — CZ radar on a map, with animation
-- [`captures/raw_ppg.csv`](captures/raw_ppg.csv) — captured regression fixture
+- [`mic-probe/`](mic-probe/) — mic capture app with UI (record/stop, live waveform, speech DSP)
+- [`filebrowser/`](filebrowser/) — simple sdcard file browser app (tap folders, swipe right = back, text reader + image viewer on file tap)
+- [`pull-recordings.sh`](pull-recordings.sh) — downloads new watch recordings, clears the device
 - [`captures/raw_ppg.csv`](captures/raw_ppg.csv) — captured regression fixture
 - [`HRV-FINDINGS.md`](HRV-FINDINGS.md) — algorithms, evidence, failures, and limits
 - [`PACE-FINDINGS.md`](PACE-FINDINGS.md) — device and sensor-hub reverse engineering
+- [`MIC-FINDINGS.md`](MIC-FINDINGS.md) — mic capture findings (only 16 kHz is usable)
 - [`SUMMARY.md`](SUMMARY.md) — concise project findings
 - [`firmware/`](firmware/) and [`firmware-tools/`](firmware-tools/) — sensor-hub research artifacts
 
@@ -213,6 +216,30 @@ static layers cached. Latest still by default; tap to loop frames at 100 ms
 - Do **not** set `android:screenOrientation` — it forces a config change that relaunches the launcher and trips its `contain 3 creator` bug.
 - `adb shell svc wifi disable` fails on this device (shell lacks `CHANGE_WIFI_STATE`); the app itself can toggle Wi-Fi.
 - `adb logcat -c` does not clear the log buffer on this watch.
+
+## Mic capture (see [`MIC-FINDINGS.md`](MIC-FINDINGS.md))
+
+The watch's digital mic runs at one native rate, **16000 Hz** — the other declared
+rates (8000/11025/44100) are decimated or mislabeled (pitch-warped) and unusable.
+The mic app records at 16 kHz and applies a validated speech chain
+(HPF 120 Hz → LP 5500 Hz → AGC → noise gate → tanh limiter) so speech is loud and
+pauses are silent. Build with `mic-probe/build.sh`, install the APK, tap REC/STOP,
+then pull the recordings:
+
+```bash
+mic-probe/build.sh
+adb install -r mic-probe/aligned.apk
+adb shell am start -n com.hrv.mic/.MainActivity   # tap REC, speak, tap STOP
+./pull-recordings.sh                                # downloads + clears device
+```
+
+Back/home exits the app completely (hard kill), and the screen stays awake while
+it runs.
+
+Each pull creates `captures/mic-probe/mic_16000_<rec-time>.wav`
+(processed) and `..._raw.wav` (unprocessed), keeping the on-device names.
+The DSP is pure Java (`SpeechProc.java`), verified bit-identical to the Python
+prototype.
 
 ## Important limits
 
