@@ -85,11 +85,12 @@ public class MicView extends View {
         int w = getWidth(), h = getHeight();
         float cx = w / 2f, cy = h / 2f;
         float unit = Math.min(w, h) / 300f;
+        // visible circle: radius 150u around (cx,cy) — everything must fit inside
         canvas.drawRect(0, 0, w, h, bg);
 
-        // waveform band
-        float top = cy - 95 * unit, bottom = cy - 12 * unit;
-        float x0 = cx - 108 * unit, x1 = cx + 108 * unit;
+        // waveform band (corners within the circle)
+        float top = cy - 92 * unit, bottom = cy - 12 * unit;
+        float x0 = cx - 100 * unit, x1 = cx + 100 * unit;
         float midY = (top + bottom) / 2;
         canvas.drawLine(x0, midY, x1, midY, grid);
         canvas.drawLine(x0, top, x1, top, grid);
@@ -115,23 +116,23 @@ public class MicView extends View {
 
         // duration
         textBig.setTextSize(46 * unit);
-        canvas.drawText(String.format("%02d:%02d", seconds / 60, seconds % 60), cx, cy + 22 * unit, textBig);
+        canvas.drawText(String.format("%02d:%02d", seconds / 60, seconds % 60), cx, cy + 20 * unit, textBig);
         textSmall.setTextSize(12 * unit);
-        canvas.drawText("duration", cx, cy + 40 * unit, textSmall);
+        canvas.drawText("duration", cx, cy + 38 * unit, textSmall);
 
         // status
         int sc = recording ? Color.rgb(0, 220, 120) : (processing ? Color.rgb(230, 190, 60) : Color.rgb(140, 150, 160));
         textSmall.setColor(sc);
         textSmall.setTextSize(13 * unit);
-        canvas.drawText(status, cx, cy + 62 * unit, textSmall);
+        canvas.drawText(status, cx, cy + 58 * unit, textSmall);
 
-        // buttons
-        float by = cy + 108 * unit, r = 36 * unit;
-        float rx = cx - 78 * unit, sx = cx + 78 * unit;
+        // buttons: centers 80u below center, 80u apart from center — fully inside the circle
+        float by = cy + 80 * unit, r = 32 * unit;
+        float rx = cx - 80 * unit, sx = cx + 80 * unit;
         canvas.drawCircle(rx, by, r, recording || processing ? recBtnDim : recBtn);
         canvas.drawCircle(sx, by, r, recording ? stopBtn : stopBtnDim);
-        btnText.setTextSize(17 * unit);
-        btnTextDim.setTextSize(17 * unit);
+        btnText.setTextSize(16 * unit);
+        btnTextDim.setTextSize(16 * unit);
         if (recording || processing) { btnTextDim.setColor(Color.rgb(120, 120, 130)); canvas.drawText("REC", rx, by + 6 * unit, btnTextDim); }
         else { btnText.setColor(Color.WHITE); canvas.drawText("REC", rx, by + 6 * unit, btnText); }
         if (recording) { btnText.setColor(Color.WHITE); canvas.drawText("STOP", sx, by + 6 * unit, btnText); }
@@ -143,8 +144,8 @@ public class MicView extends View {
         if (e.getAction() == MotionEvent.ACTION_UP) {
             float unit = Math.min(getWidth(), getHeight()) / 300f;
             float cx = getWidth() / 2f, cy = getHeight() / 2f;
-            float by = cy + 108 * unit, r = 42 * unit;
-            float rx = cx - 78 * unit, sx = cx + 78 * unit;
+            float by = cy + 80 * unit, r = 40 * unit;
+            float rx = cx - 80 * unit, sx = cx + 80 * unit;
             float dx = e.getX() - rx, dy = e.getY() - by;
             if (dx * dx + dy * dy < r * r) { if (listener != null && !recording) listener.onRecord(); return true; }
             dx = e.getX() - sx; dy = e.getY() - by;
