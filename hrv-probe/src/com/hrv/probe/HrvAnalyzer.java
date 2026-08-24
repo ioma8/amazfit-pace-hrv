@@ -1,11 +1,13 @@
 package com.hrv.probe;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
 /** Pure 25 Hz PPG beat extraction and emwave-compatible resonance scoring. */
 public final class HrvAnalyzer {
+    private static final int[] SMOOTH_KERNEL = new int[]{1, 6, 15, 20, 15, 6, 1};
     private HrvAnalyzer() {}
 
     public static final class Result {
@@ -29,7 +31,7 @@ public final class HrvAnalyzer {
     public static Result analyze(float[] values, long[] times) {
         int n = values.length;
         if (n < 305 || times.length != n) return null; // 12s at the measured 25.4Hz
-        double dt = (times[n - 1] - times[0]) / 1e9 / (n - 1);
+        double dt = uniformSamplePeriod(times);
         double fs = 1.0 / dt;
         if (fs < 24.0 || fs > 27.0) return null;
 
@@ -38,11 +40,16 @@ public final class HrvAnalyzer {
         if (noise < 1.0) return null;
         List<Double> peaks = findPeaks(filtered, fs, noise, dt);
         if (peaks.size() < 12) return null;
+        List<Boolean> peakQuality = morphologyQuality(filtered, peaks);
 
         List<Double> ibis = new ArrayList<Double>();
         for (int i = 1; i < peaks.size(); i++) ibis.add((peaks.get(i) - peaks.get(i - 1)) * dt);
-        CleanIntervals intervals = cleanIntervals(ibis);
-        if (intervals.validCount < 10) return null;
+        CleanIntervals intervals = cleanIntervals(ibis, peakQuality);
+        double detectedSpan = 0.0;
+        for (double ibi : ibis) detectedSpan += ibi;
+        int expectedIntervals = (int) Math.round(detectedSpan / median(ibis));
+        int minimumClean = Math.max(10, (int) Math.ceil(expectedIntervals * 0.70));
+        if (intervals.validCount < minimumClean) return null;
 
         double mean = 0.0;
         for (int i = 0; i < intervals.values.size(); i++) {
@@ -68,7 +75,8 @@ public final class HrvAnalyzer {
                 pairs++;
             }
         }
-        if (pairs < 8) return null;
+        int minimumPairs = Math.max(8, (int) Math.ceil((intervals.values.size() - 1) * 0.55));
+        if (pairs < minimumPairs) return null;
         rmssd = Math.sqrt(rmssd / pairs);
 
         // emwave-utils: LF normalized power multiplied by log-scaled LF peak
@@ -87,24 +95,49 @@ public final class HrvAnalyzer {
         }
     }
 
+    private static double uniformSamplePeriod(long[] times) {
+        int n = times.length;
+        double meanIndex = (n - 1) / 2.0;
+        double numerator = 0.0;
+        double denominator = 0.0;
+        long origin = times[0];
+        for (int i = 0; i < n; i++) {
+            double x = i - meanIndex;
+            double elapsed = (times[i] - origin) / 1e9;
+            numerator += x * elapsed;
+            denominator += x * x;
+        }
+        return numerator / denominator;
+    }
+
     private static double[] preprocess(float[] values, double fs) {
         int n = values.length;
-        int span = Math.max(9, (int) Math.round(1.6 * fs));
-        double[] out = new double[n];
-        double sum = 0.0;
+        int span = Math.max(9, (int) Math.round(1.6 * fs)) | 1;
+        int half = span / 2;
+        double[] highPass = new double[n];
         for (int i = 0; i < n; i++) {
-            sum += values[i];
-            if (i >= span) sum -= values[i - span];
-            int count = Math.min(i + 1, span);
-            out[i] = values[i] - sum / count;
+            double sum = 0.0;
+            for (int j = -half; j <= half; j++) sum += values[reflect(i + j, n)];
+            highPass[i] = values[i] - sum / span;
         }
+
+        // Symmetric seven-point binomial smoother: zero phase, enough noise
+        // suppression for 25 Hz without flattening the optical apex.
         double[] smooth = new double[n];
-        for (int i = 1; i < n - 1; i++) {
-            smooth[i] = (out[i - 1] + 2.0 * out[i] + out[i + 1]) / 4.0;
+        for (int i = 0; i < n; i++) {
+            double sum = 0.0;
+            for (int j = -3; j <= 3; j++) {
+                sum += SMOOTH_KERNEL[j + 3] * highPass[reflect(i + j, n)];
+            }
+            smooth[i] = sum / 64.0;
         }
-        smooth[0] = out[0];
-        smooth[n - 1] = out[n - 1];
         return smooth;
+    }
+
+    private static int reflect(int index, int size) {
+        if (index < 0) return -index;
+        if (index >= size) return 2 * size - index - 2;
+        return index;
     }
 
     private static double robustNoise(double[] x) {
@@ -144,11 +177,70 @@ public final class HrvAnalyzer {
         }
         return peaks;
     }
+    private static List<Boolean> morphologyQuality(double[] signal, List<Double> peaks) {
+        final int before = 5;
+        final int after = 7;
+        final int width = before + after + 1;
+        int count = peaks.size();
+        double[][] segments = new double[count][width];
+        boolean[] usable = new boolean[count];
 
-    private static CleanIntervals cleanIntervals(List<Double> input) {
+        for (int i = 0; i < count; i++) {
+            int center = (int) Math.round(peaks.get(i));
+            if (center - before < 0 || center + after >= signal.length) continue;
+            double mean = 0.0;
+            for (int j = 0; j < width; j++) mean += signal[center - before + j];
+            mean /= width;
+            double norm = 0.0;
+            for (int j = 0; j < width; j++) {
+                double value = signal[center - before + j] - mean;
+                segments[i][j] = value;
+                norm += value * value;
+            }
+            norm = Math.sqrt(norm);
+            if (norm == 0.0) continue;
+            for (int j = 0; j < width; j++) segments[i][j] /= norm;
+            usable[i] = true;
+        }
+
+        double[] template = new double[width];
+        double[] column = new double[count];
+        for (int j = 0; j < width; j++) {
+            int available = 0;
+            for (int i = 0; i < count; i++) {
+                if (usable[i]) column[available++] = segments[i][j];
+            }
+            if (available == 0) return allFalse(count);
+            Arrays.sort(column, 0, available);
+            template[j] = column[available / 2];
+        }
+        double mean = 0.0;
+        for (double value : template) mean += value;
+        mean /= width;
+        double norm = 0.0;
+        for (int j = 0; j < width; j++) {
+            template[j] -= mean;
+            norm += template[j] * template[j];
+        }
+        norm = Math.sqrt(norm);
+        if (norm == 0.0) return allFalse(count);
+        for (int j = 0; j < width; j++) template[j] /= norm;
+
+        List<Boolean> quality = new ArrayList<Boolean>();
+        for (int i = 0; i < count; i++) {
+            double correlation = 0.0;
+            if (usable[i]) for (int j = 0; j < width; j++) correlation += segments[i][j] * template[j];
+            quality.add(usable[i] && correlation >= 0.85);
+        }
+        return quality;
+    }
+
+
+    private static CleanIntervals cleanIntervals(List<Double> input, List<Boolean> peakQuality) {
         if (input.size() < 10) return new CleanIntervals(input, allFalse(input.size()));
         double med = median(input);
         List<Double> merged = new ArrayList<Double>();
+        List<Boolean> morphologyValid = new ArrayList<Boolean>();
         for (int i = 0; i < input.size();) {
             double d = input.get(i);
             if (d >= 0.20 && d < 0.68 * med && i + 1 < input.size()) {
@@ -157,11 +249,13 @@ public final class HrvAnalyzer {
                 // intervals; their sum should be one median IBI, not two.
                 if (Math.abs(sum - med) <= 0.25 * med) {
                     merged.add(sum);
+                    morphologyValid.add(peakQuality.get(i) && peakQuality.get(i + 2));
                     i += 2;
                     continue;
                 }
             }
             merged.add(d);
+            morphologyValid.add(peakQuality.get(i) && peakQuality.get(i + 1));
             i++;
         }
         double med2 = median(merged);
@@ -169,7 +263,8 @@ public final class HrvAnalyzer {
         int count = 0;
         for (int i = 0; i < merged.size(); i++) {
             double d = merged.get(i);
-            boolean ok = d >= 0.35 && d <= 2.0 && d >= 0.58 * med2 && d <= 1.55 * med2;
+            boolean ok = morphologyValid.get(i) && d >= 0.35 && d <= 2.0
+                && d >= 0.58 * med2 && d <= 1.55 * med2;
             // An isolated bad interval must not contaminate either RMSSD pair.
             if (ok && i > 0 && i + 1 < merged.size()) {
                 double local = median(new ArrayList<Double>(merged.subList(Math.max(0, i - 2), Math.min(merged.size(), i + 3))));
@@ -207,7 +302,7 @@ public final class HrvAnalyzer {
         // Keep real elapsed time across rejected intervals; closing those gaps
         // would shift spectral power and inflate coherence.
         double span = time[time.length - 1] - time[0];
-        if (span < 12.0) return 0.0;
+        if (span < 25.0) return 0.0;
         int npts = (int) (span * 4.0);
         if (npts < 16) return 0.0;
         double[] yi = new double[npts];
@@ -220,22 +315,25 @@ public final class HrvAnalyzer {
             yi[k] = clean.get(j) + (clean.get(j + 1) - clean.get(j)) * f;
         }
         detrendHann(yi);
-        int nf = npts / 2;
-        double[] power = new double[nf];
-        for (int k = 0; k < nf; k++) power[k] = dftPower(yi, k * 4.0 / npts);
-        double lf = band(power, 4.0 / npts, 0.04, 0.15);
-        double hf = band(power, 4.0 / npts, 0.15, 0.40);
-        if (lf + hf <= 0.0) return 0.0;
+        // Four-times frequency oversampling keeps the LF peak estimate stable
+        // when a sliding window starts at a different respiratory phase.
+        double step = 1.0 / (span * 4.0);
+        double lf = 0.0;
+        double hf = 0.0;
         double peak = 0.0;
-        List<Double> lfBins = new ArrayList<Double>();
-        for (int k = 0; k < nf; k++) {
-            double freq = k * 4.0 / npts;
-            if (freq >= 0.04 && freq <= 0.15) {
-                lfBins.add(power[k]);
-                peak = Math.max(peak, power[k]);
+        List<Double> lfPowers = new ArrayList<Double>();
+        for (double frequency = 0.04; frequency < 0.40; frequency += step) {
+            double power = dftPower(yi, frequency);
+            if (frequency < 0.15) {
+                lf += power;
+                lfPowers.add(power);
+                peak = Math.max(peak, power);
+            } else {
+                hf += power;
             }
         }
-        double medianLf = median(lfBins);
+        if (lf + hf <= 0.0 || lfPowers.isEmpty()) return 0.0;
+        double medianLf = median(lfPowers);
         double concentration = medianLf > 0.0 ? Math.max(0.0, Math.min(1.0,
             Math.log10(Math.max(1.0, peak / medianLf)) / 2.0)) : 0.0;
         return lf / (lf + hf) * concentration * 100.0;
@@ -265,20 +363,6 @@ public final class HrvAnalyzer {
         return re * re + im * im;
     }
 
-    private static double band(double[] power, double binHz, double low, double high) {
-        double result = 0.0;
-        for (int k = 0; k < power.length; k++) {
-            double f = k * binHz;
-            if (f >= low && f < high) result += power[k];
-        }
-        return result;
-    }
-
-    private static double rms(double[] x) {
-        double sum = 0.0;
-        for (double v : x) sum += v * v;
-        return Math.sqrt(sum / x.length);
-    }
 
     private static double median(List<Double> values) {
         List<Double> sorted = new ArrayList<Double>(values);
@@ -287,8 +371,8 @@ public final class HrvAnalyzer {
     }
 
     private static double median(double[] values) {
-        List<Double> list = new ArrayList<Double>(values.length);
-        for (double v : values) list.add(v);
-        return median(list);
+        double[] sorted = values.clone();
+        Arrays.sort(sorted);
+        return sorted[sorted.length / 2];
     }
 }

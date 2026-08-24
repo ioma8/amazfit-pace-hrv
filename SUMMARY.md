@@ -32,17 +32,17 @@ Concise digest of the recon + reverse-engineering sessions. Detailed logs: [`PAC
   starts continuous optical measurement; `[D0 02 00]` stops it and turns the LED off.
 - The hub delivers one changing PPG value per event at approximately **25.2–25.8 Hz**. The 16-value event array
   is not 16 time samples. Callbacks arrive as approximately five-sample bursts every 200 ms.
-- Callback arrival timestamps are unusable for beat timing. Reconstructing a uniform clock from sample index and
-  the measured mean period reduced same-peak RMSSD from **147–168 ms** to **37–41 ms** without changing HR.
+- Callback arrival timestamps are unusable for beat timing. A least-squares sample-index clock reduces 305-sample
+  period-estimate SD from **0.330 ms** to **0.018 ms** and avoids five-sample burst boundary bias.
 - A captured 59.7-second, 1,507-sample fixture proved that a global absolute-height threshold discarded real
-  pulses during baseline drift. Adaptive local-prominence detection finds **82 peaks / 81 valid intervals**.
-- Calibrated fixture result: **83.21 bpm**, **RMSSD 40.02 ms**, **SDNN 70.37 ms**, coherence **40.31%**.
+  pulses during baseline drift. Zero-phase adaptive local-prominence detection finds **82 peaks / 81 valid intervals**.
+- Calibrated fixture result: **83.28 bpm**, **RMSSD 42.27 ms**, **SDNN 71.35 ms**, coherence **64.46%**.
 - A subsequent watch run was stable at **85–87 bpm**, **RMSSD 31–36 ms**, **SDNN 56–62 ms**, with up to
   **75/76** clean intervals. No Android runtime crash occurred.
-- RMSSD never bridges rejected intervals. Dicrotic repair merges two short intervals only when they sum to one
-  normal IBI. Frequency scoring preserves real elapsed time across rejected intervals.
-- The score now matches `emwave-utils/src/metrics.rs`: normalized LF power multiplied by log-scaled LF peak
-  concentration, explicitly bounded to **0–100**. The old saturating RMSSD-to-percent curve was removed.
+- RMSSD never bridges rejected intervals. Median-template morphology, expected-beat coverage, and adjacent-pair
+  gates reject distorted or fragmented windows. Dicrotic repair preserves one real IBI.
+- The score follows `emwave-utils/src/metrics.rs`, with its LF frequency scan oversampled four times for stable
+  sliding windows. It is bounded to **0–100** and withheld until 25 seconds; the saturating RMSSD curve is gone.
 - Current app: `hrv-probe/`; evidence and limitations: [`HRV-FINDINGS.md`](HRV-FINDINGS.md); regression fixture:
   `captures/raw_ppg.csv`.
 

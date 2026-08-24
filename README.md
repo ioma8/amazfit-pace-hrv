@@ -2,17 +2,17 @@
 
 Rootless raw-PPG capture, HRV analysis, and sensor-hub research for the Amazfit Pace A1612.
 
-The watch exposes one usable PPG sample per Android sensor event at approximately 25.4 Hz. Events arrive in five-sample transport bursts, so this project reconstructs a uniform sample clock, detects pulse peaks with adaptive local prominence, rejects artifacts without bridging them, and computes time-domain HRV plus an LF resonance score.
+The watch exposes one usable PPG sample per Android sensor event at approximately 25.2 Hz. Events arrive in five-sample transport bursts, so this project fits a uniform sample clock, uses zero-phase filtering and adaptive local-prominence peaks, validates pulse morphology, and computes artifact-gated time-domain HRV plus an LF resonance score.
 
 ## Current result
 
 The included 59.7-second on-wrist fixture contains 1,507 raw samples. The calibrated analyzer finds 82 pulse peaks and produces:
 
 ```text
-HR       83.21 bpm
-RMSSD    40.02 ms
-SDNN     70.37 ms
-Score    40.31%
+HR       83.28 bpm
+RMSSD    42.27 ms
+SDNN     71.35 ms
+Score    64.46%
 Clean    81/81 intervals
 ```
 

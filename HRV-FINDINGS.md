@@ -14,14 +14,14 @@ The application receives approximately 25.2–25.8 PPG samples per second. Each 
 
 Sensor callbacks do not arrive uniformly. The hub commonly delivers approximately five historical samples in a burst every 200 ms. Callback arrival timestamps therefore cannot be used as individual pulse timestamps. Doing so previously inflated RMSSD from approximately 37–41 ms to 147–168 ms while leaving mean heart rate nearly unchanged.
 
-The current analyzer reconstructs one uniform sample clock from the first and last callback timestamps:
+The current analyzer fits one uniform sample clock by least squares over every callback time and its sample index:
 
 ```text
-dt = (last_callback_time - first_callback_time) / (sample_count - 1)
+dt = slope(sample_index, callback_elapsed_time)
 peak_time = fractional_peak_sample_index * dt
 ```
 
-This preserves the measured average sampling rate while removing callback batching jitter.
+This preserves the measured mean sampling rate while averaging over burst position and scheduling jitter. Across all 305-sample fixture windows, first-to-last timing varied from 39.250 to 40.014 ms per sample (SD 0.330 ms); regression timing varied only from 39.598 to 39.666 ms (SD 0.018 ms).
 
 ## Captured PPG Fixture
 
@@ -101,50 +101,68 @@ The loop now checks `running` immediately after waking and exits before analysis
 `HrvAnalyzer` performs the following steps:
 
 1. Require at least 305 samples, approximately 12 seconds at the measured rate.
-2. Reconstruct the uniform sample period from the complete window.
+2. Fit the uniform sample period by linear regression over every sample index and callback time.
 3. Reject windows outside the observed 24–27 Hz range.
-4. Remove baseline drift with a 1.6-second moving average.
-5. Apply a three-point weighted smoother `[1, 2, 1] / 4`.
+4. Remove baseline drift with a centered, reflection-padded 1.6-second moving average.
+5. Apply the zero-phase seven-point binomial smoother `[1, 6, 15, 20, 15, 6, 1] / 64`.
 6. Estimate robust noise from the median absolute first difference multiplied by `1.4826`.
 7. Detect local maxima whose bilateral prominence is at least `1.4 × robust_noise`.
-8. Estimate sub-sample peak positions with parabolic interpolation, limited to ±0.5 sample.
+8. Estimate sub-sample optical-apex positions with parabolic interpolation, limited to ±0.5 sample.
 9. Apply a 380 ms refractory period and keep the stronger candidate when two candidates conflict.
-10. Build IBIs from fractional peak positions on the uniform sample clock.
-11. Repair a split interval only when two short intervals sum to approximately one median IBI.
-12. Reject intervals outside 350–2,000 ms, outside 0.58–1.55 times the global median, or more than 28% from the local five-interval median.
-13. Compute HR, sample SDNN, and RMSSD only from valid NN intervals; RMSSD never crosses an invalid interval.
-14. Compute the coherence score on a 4 Hz linearly interpolated NN series using its real elapsed timeline.
+10. Build a median normalized 13-sample pulse template and mark peaks below 0.85 morphology correlation.
+11. Build IBIs from fractional peak positions on the regression-derived uniform sample clock.
+12. Repair a split interval only when two short intervals sum to approximately one median IBI.
+13. Reject intervals adjacent to bad morphology, outside 350–2,000 ms, outside 0.58–1.55 times the global median, or more than 28% from the local five-interval median.
+14. Require at least 70% of expected intervals and 55% adjacent clean pairs; fragmented clean islands do not produce trusted metrics.
+15. Compute HR, sample SDNN, and RMSSD only from valid NN intervals; RMSSD never crosses an invalid interval.
+16. Compute coherence after 25 seconds on a 4 Hz NN series using real elapsed time and a four-times-oversampled frequency grid.
 
 The 55-second sliding analysis window limits drift and prevents old transient data from dominating current metrics.
 
 ## Metrics on the Captured Data
 
-The calibrated analyzer produces:
+The upgraded analyzer produces:
 
 ```text
-Detected peaks: 82
-Intervals:      81
-Clean intervals:81/81
-IBI range:      596–857 ms
-Heart rate:     83.21 bpm
-RMSSD:          40.02 ms
-SDNN:           70.37 ms
-Score:          40.31%
+Detected peaks:  82
+Intervals:       81
+Clean intervals: 81/81
+IBI range:       approximately 597–862 ms
+Heart rate:      83.28 bpm
+RMSSD:           42.27 ms
+SDNN:            71.35 ms
+Score:           64.46%
 ```
 
-The IBI sequence changes smoothly through the approximately 0.1 Hz paced-breathing cycle visible in the capture. The 596–857 ms range corresponds to the observed respiratory sinus arrhythmia rather than isolated timing jumps.
+The IBI sequence changes smoothly through the approximately 0.1 Hz paced-breathing cycle visible in the capture. The interval range corresponds to observed respiratory sinus arrhythmia rather than isolated timing jumps.
 
-The previous detector on the same data returned approximately:
+Earlier processing stages on the same data demonstrate why the complete detector matters:
 
 ```text
-Heart rate:      81.24 bpm
-RMSSD:           25.34 ms
-SDNN:            61.16 ms
-Score:            2.56%
-Clean intervals: 51/56
+Stage                                      HR       RMSSD    SDNN     Score   Clean
+Absolute-height detector                   81.24    25.34    61.16     2.56   51/56
+Causal prominence detector                 83.21    40.02    70.37    40.31   81/81
+Centered + morphology + regression clock   83.28    42.27    71.35    64.46   81/81
 ```
 
-That result was biased because the absolute-height threshold discarded low-baseline pulses. The calibrated result uses every visible pulse and therefore captures substantially more of the real beat-to-beat variation.
+The first result discarded low-baseline pulses. The current result retains every visible pulse, removes preprocessing phase distortion, stabilizes the transport clock, and uses a frequency grid that is much less sensitive to sliding-window phase.
+
+## Advanced Approach Comparison
+
+Multiple plausible 25 Hz timing approaches were tested rather than selected by appearance:
+
+| Approach | Result |
+|---|---|
+| Causal moving-average detrending | Rejected. Under gain, offset, and slow-baseline perturbations it detected 74–82 peaks; centered processing always detected 82. |
+| Centered seven-point binomial processing | Selected. It preserves all captured peaks and materially reduces additive-noise and baseline sensitivity. |
+| Maximum rising-slope pulse foot | Rejected. Foot-to-apex offset SD was 20–38 ms and RMSSD varied from 52 to 98 ms with the search window. |
+| Median-template phase alignment | Rejected for timing. It reduced noisy trial spread but shifted clean RMSSD by morphology-dependent phase offsets without ECG evidence. |
+| Median-template morphology correlation | Selected for quality only. Every clean captured pulse exceeds 0.95 correlation; a conservative 0.85 threshold identifies distorted beats. |
+| Three-, five-, and seven-point apex fits | The three-point parabola after seven-point smoothing stayed within roughly 1 ms RMS IBI difference of higher-order fits, without their edge sensitivity. |
+
+Stress testing over 200 gain/offset/baseline trials kept the centered detector at 82 peaks with RMSSD SD 0.03 ms; the causal detector ranged down to 74 peaks with RMSSD SD 0.45 ms. With severe added noise (`σ=20` ADC units), centered processing reduced RMSSD median/p95 from approximately 59.5/72.3 ms to 52.3/59.1 ms. Morphology marking reduced four-spike trial RMSSD from approximately 54/74 ms median/p95 to 43/51 ms.
+
+The coherence grid was also tested over four overlapping 1,400-sample windows. Ordinary DFT-bin scoring ranged from 51.69% to 68.85%; four-times frequency oversampling narrowed this to 57.06%–63.53% while preserving the same LF/HF definition.
 
 ## Live Watch Verification
 
@@ -170,15 +188,15 @@ The algorithm:
 1. Represent valid NN intervals against their physiological timestamps.
 2. Resample the NN series to 4 Hz with linear interpolation.
 3. Remove a linear trend and apply a Hann window.
-4. Compute a direct power spectrum.
-5. Sum LF power from 0.04 to 0.15 Hz and HF power from 0.15 to 0.40 Hz.
+4. Evaluate the direct spectrum on a grid spaced at `1 / (window_span × 4)` Hz.
+5. Sum grid power from 0.04 to 0.15 Hz as LF and from 0.15 to 0.40 Hz as HF.
 6. Compute normalized LF power:
 
 ```text
 LF_nu = LF / (LF + HF) * 100
 ```
 
-7. Find the strongest LF bin and compare it with the median LF-bin power.
+7. Find the strongest oversampled LF frequency and compare it with median LF-grid power.
 8. Convert peak prominence to a bounded concentration:
 
 ```text
@@ -192,6 +210,8 @@ score = clamp(LF_nu * concentration, 0, 100)
 ```
 
 The prior exponential `RMSSD → percent` mapping was removed. High RMSSD alone does not imply coherent paced breathing, and that mapping saturated near 100% for ordinary RMSSD values.
+
+The score is withheld until at least 25 seconds of valid physiological span is available. This follows the `BUILDING` boundary in `emwave-utils` and avoids presenting a poorly resolved short-window spectrum as a physiological zero.
 
 ## UI and Source Organization
 
@@ -232,20 +252,23 @@ HrvAnalyzer checks passed
 
 The checks protect:
 
-- the exact captured peak/interval count;
-- captured HR, RMSSD, SDNN, and score ranges;
+- the exact captured peak/interval count and tightened metric ranges;
+- invariance to optical gain, offset, and slow baseline movement;
+- morphology-aware handling of isolated optical spikes;
+- rejection of a 24-second flat signal dropout;
 - distinction between steady and genuinely variable synthetic pulse timing;
-- baseline drift and isolated optical spikes;
-- the approximately 12-second initial metric window;
-- the score's `0..100` bound.
+- regression-clock immunity to five-sample callback bursts;
+- the approximately 12-second initial HR/RMSSD window;
+- coherence stability across overlapping 55-second windows;
+- the score's `0..100` bound and 25-second minimum span.
 
 ## Current Limits
 
 - The calibration is grounded in one complete raw on-wrist capture plus subsequent live metric logs. More captures across users, heart rates, motion levels, skin contact, and LED modes are required before broad population claims.
 - There is no simultaneous ECG reference. The metrics match the pulse timing present in the PPG data, but absolute clinical accuracy has not been established.
 - At approximately 25 Hz, one raw sample is about 39.6 ms apart. Parabolic interpolation improves peak timing when pulse morphology is smooth, but it cannot create information absent from the sampled waveform.
-- Motion artifacts can still remove usable intervals. The analyzer rejects questionable NN pairs rather than inventing replacements.
-- Frequency-domain coherence needs a longer window than basic HR/RMSSD. Early score zero is currently also used as the unavailable value in the UI.
+- Motion artifacts can still remove usable intervals. Pulse morphology, expected-beat coverage, and adjacent-pair gates reject questionable windows rather than inventing replacements.
+- Frequency-domain coherence needs at least 25 seconds, substantially longer than basic HR/RMSSD. Early score zero is the UI's unavailable value, not a measured zero-coherence state.
 - The score measures LF resonance concentration. It is not a diagnosis, stress measurement, or universal health percentage.
 
 ## Artifacts

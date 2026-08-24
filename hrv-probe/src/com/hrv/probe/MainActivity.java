@@ -93,7 +93,7 @@ public class MainActivity extends Activity {
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "hrvprobe");
         wl.acquire();
-        log("=== V18 LIVE HRV (captured-data calibrated) ===");
+        log("=== V19 LIVE HRV (morphology-calibrated) ===");
         log("model=" + Build.MODEL + " sdk=" + Build.VERSION.SDK_INT);
 
         Thread responder = new Thread(new Runnable() {
