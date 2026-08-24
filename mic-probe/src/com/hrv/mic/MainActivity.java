@@ -29,6 +29,7 @@ public class MainActivity extends Activity {
     private MicView view;
     private volatile boolean recording = false;
     private volatile Thread worker = null;
+    private volatile String recTs = null;
     private PowerManager.WakeLock wl;
 
     static class ShortBuf {
@@ -58,6 +59,7 @@ public class MainActivity extends Activity {
     void startRecording() {
         if (recording) return;
         recording = true;
+        recTs = new SimpleDateFormat("yyyyMMdd_HHmmss_SSS").format(new Date());
         view.setRecording(true);
         view.setProcessing(false);
         view.setSeconds(0);
@@ -105,7 +107,7 @@ public class MainActivity extends Activity {
         short[] samples = buf.toArray();
         view.setProcessing(true);
         view.setStatus("Processing...");
-        String ts = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+        String ts = recTs;
         File dir = new File(Environment.getExternalStorageDirectory(), "mic-probe");
         dir.mkdirs();
         try {

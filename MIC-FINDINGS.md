@@ -80,9 +80,12 @@ duration, REC/STOP buttons, save status. Records at 16000 Hz (max 60 s), writes
 two files per capture to `/sdcard/mic-probe/`:
 
 ```text
-mic_16000_<yyyyMMdd_HHmmss>.wav       processed (loud, denoised)
-mic_16000_<yyyyMMdd_HHmmss>_raw.wav   untouched capture
+mic_16000_<yyyyMMdd_HHmmss_SSS>.wav       processed (loud, denoised)
+mic_16000_<yyyyMMdd_HHmmss_SSS>_raw.wav   untouched capture
 ```
+
+The timestamp is taken at **recording start**; millisecond precision keeps rapid
+successive recordings in separate files (each REC/STOP cycle creates a new pair).
 
 Source split:
 
