@@ -1,64 +1,61 @@
 package com.weather.probe;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Parses the server-rendered hourly cards from Foreca's current-day page. */
+/**
+ * Parses the JSON forecast array Foreca embeds in the server-rendered hourly page:
+ * renderHourly({ ..., data: [{"time":...,"temp":..,"flike":..,"rhum":..,"rain":..,
+ *                             "windskmh":..,"wx":..,"rainp":..,"h24":..}, ...] });
+ */
 public final class ForecaParser {
-    private static final Pattern HOUR = Pattern.compile(
-            "<div\\s+class=\\\"hour\\\"[^>]*>(.*?)</div>\\s*</div>\\s*</div>",
-            Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern DATA = Pattern.compile(
+            "data:\\s*(\\[[\\s\\S]*?\\])\\s*,", Pattern.CASE_INSENSITIVE);
 
     private ForecaParser() { }
 
     public static WeatherForecast parse(String html, long fetchedAt) {
         if (html == null || html.length() == 0) throw new IllegalArgumentException("empty response");
-        List<WeatherForecast.Entry> result = new ArrayList<WeatherForecast.Entry>();
-        Matcher hours = HOUR.matcher(html);
-        while (hours.find()) {
-            String card = hours.group(1);
-            result.add(new WeatherForecast.Entry(
-                    value(card, "time_24h", "--"),
-                    signed(value(card, "temp_c", "--")),
-                    signed(feelsLike(card)),
-                    value(card, "humidity", "--").replace("%", "").trim() + "%",
-                    value(card, "rain_mm", "--"),
-                    value(card, "wind_kmh", "--") + " km/h",
-                    value(card, "symbolText", "--"),
-                    value(card, "precipChance", "--")));
+        Matcher m = DATA.matcher(html);
+        if (!m.find()) throw new IllegalArgumentException("no hourly forecast data in page");
+        try {
+            JSONArray array = new JSONArray(m.group(1));
+            List<WeatherForecast.Entry> rows = new ArrayList<WeatherForecast.Entry>();
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject o = array.getJSONObject(i);
+                rows.add(new WeatherForecast.Entry(
+                        o.optString("h24", hourOf(o.optString("time", ""))),
+                        signed(o.optDouble("temp", 0)),
+                        signed(o.optDouble("flike", 0)),
+                        (int) Math.round(o.optDouble("rhum", 0)) + "%",
+                        formatRain(o.optDouble("rain", 0)),
+                        (int) Math.round(o.optDouble("windskmh", 0)) + " km/h",
+                        o.optString("wx", "--"),
+                        (int) Math.round(o.optDouble("rainp", 0)) + "%"));
+            }
+            if (rows.isEmpty()) throw new IllegalArgumentException("no hourly forecast rows");
+            return new WeatherForecast(fetchedAt, rows);
+        } catch (JSONException e) {
+            throw new IllegalArgumentException("bad forecast json: " + e.getMessage());
         }
-        if (result.isEmpty()) throw new IllegalArgumentException("no hourly forecast rows");
-        return new WeatherForecast(fetchedAt, result);
     }
 
-    private static String feelsLike(String html) {
-        Matcher container = Pattern.compile(
-                "class=\"[^\"]*feelsLike[^\"]*\"[^>]*>(.*?)</div>",
-                Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(html);
-        if (!container.find()) return "--";
-        return value(container.group(1), "temp_c", "--");
+    private static String hourOf(String iso) {
+        return iso.length() >= 13 ? iso.substring(11, 13) : "--";
     }
 
-    private static String value(String html, String className, String fallback) {
-        Pattern p = Pattern.compile("class=\\\"[^\\\"]*" + className
-                + "[^\\\"]*\\\"[^>]*>(.*?)</(?:span|div)>",
-                Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
-        Matcher m = p.matcher(html);
-        if (!m.find()) return fallback;
-        String text = m.group(1).replaceAll("<[^>]+>", " ");
-        text = decode(text).replace('\u00a0', ' ').trim().replaceAll("\\s+", " ");
-        return text.length() == 0 ? fallback : text;
+    private static String signed(double value) {
+        int i = (int) Math.round(value);
+        return i >= 0 ? "+" + i : String.valueOf(i);
     }
 
-    private static String signed(String text) {
-        return text.startsWith("+") || text.startsWith("-") || "--".equals(text) ? text : "+" + text;
-    }
-
-    private static String decode(String text) {
-        return text.replace("&nbsp;", " ").replace("&lt;", "<")
-                .replace("&gt;", ">").replace("&amp;", "&")
-                .replace("&#39;", "'").replace("&quot;", "\"");
+    private static String formatRain(double value) {
+        return (value == Math.floor(value) ? String.valueOf((long) value) : String.valueOf(value)) + " mm";
     }
 }

@@ -1,8 +1,11 @@
 package com.weather.probe;
 
 import android.app.Activity;
+import android.content.Context;
 import android.graphics.Color;
+import android.net.wifi.WifiManager;
 import android.os.Bundle;
+import android.os.Process;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -27,10 +30,22 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         buildUi();
-        WeatherForecast cached = ForecastStore.load(this);
-        if (cached != null) showForecast(cached, "Saved forecast");
+        WeatherForecast[] cached = ForecastStore.load(this);
+        if (cached != null) showForecast(cached[0], cached[1], "Saved forecast");
         else status.setText("No saved forecast. Connecting to Wi-Fi…");
         download();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        WifiManager wifi = (WifiManager) getSystemService(Context.WIFI_SERVICE);
+        if (wifi != null && wifi.isWifiEnabled()) {
+            android.util.Log.i("WeatherProbe", "paused: disabling wifi");
+            wifi.setWifiEnabled(false);
+        }
+        finish();
+        Process.killProcess(Process.myPid());
     }
 
     @Override
@@ -75,12 +90,15 @@ public class MainActivity extends Activity {
         executor.submit(new Runnable() {
             @Override public void run() {
                 try {
-                    final WeatherForecast forecast = ForecastDownloader.download(MainActivity.this);
-                    ForecastStore.save(MainActivity.this, forecast);
+                    final WeatherForecast[] forecast = ForecastDownloader.download(MainActivity.this);
+                    ForecastStore.save(MainActivity.this, forecast[0], forecast[1]);
+                    android.util.Log.i("WeatherProbe", "download ok: " + forecast[0].entries.size()
+                            + "+" + forecast[1].entries.size() + " hours");
                     runOnUiThread(new Runnable() {
-                        @Override public void run() { showForecast(forecast, "Updated"); }
+                        @Override public void run() { showForecast(forecast[0], forecast[1], "Updated"); }
                     });
                 } catch (final Exception error) {
+                    android.util.Log.e("WeatherProbe", "download failed", error);
                     runOnUiThread(new Runnable() {
                         @Override public void run() {
                             refresh.setEnabled(true);
@@ -92,29 +110,39 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void showForecast(WeatherForecast forecast, String prefix) {
+    private void showForecast(WeatherForecast today, WeatherForecast tomorrow, String prefix) {
         table.removeAllViews();
-        addRow(new String[]{"Time", "Temp", "Feels", "Hum", "Rain", "Wind", "Condition"}, true);
-        for (WeatherForecast.Entry entry : forecast.entries) {
-            addRow(new String[]{entry.time, entry.temperature, entry.feelsLike,
-                    entry.humidity, entry.precipitation, entry.wind,
-                    entry.condition + " (" + entry.precipitationChance + ")"}, false);
-        }
+        addRow(new String[]{"Time", "Temp", "Wind", "Rain%", "Condition"}, true);
+        for (WeatherForecast.Entry e : today.entries) addRow(row(e), false);
+        addSeparator("Tomorrow");
+        for (WeatherForecast.Entry e : tomorrow.entries) addRow(row(e), false);
         status.setText(prefix + " " + DateFormat.getTimeInstance(DateFormat.SHORT)
-                .format(new Date(forecast.fetchedAt)) + " · " + forecast.entries.size() + " hours");
+                .format(new Date(today.fetchedAt)) + " · " + today.entries.size()
+                + "+" + tomorrow.entries.size() + " h");
         refresh.setEnabled(true);
+    }
+
+    private String[] row(WeatherForecast.Entry e) {
+        return new String[]{e.time, e.temperature, e.wind, e.precipitationChance, e.condition};
+    }
+
+    private void addSeparator(String label) {
+        TextView sep = text(label, 10, Color.WHITE);
+        sep.setGravity(Gravity.CENTER_HORIZONTAL);
+        sep.setBackgroundColor(Color.rgb(55, 75, 82));
+        table.addView(sep, new TableLayout.LayoutParams(-1, 24));
     }
 
     private void addRow(String[] values, boolean header) {
         TableRow row = new TableRow(this);
         row.setPadding(0, 1, 0, 1);
-        for (String value : values) {
-            TextView cell = text(value, header ? 10 : 10, header ? Color.WHITE : Color.rgb(225, 230, 232));
+        int[] widths = new int[]{40, 40, 50, 50, 120};
+        for (int i = 0; i < values.length; i++) {
+            TextView cell = text(values[i], 10, header ? Color.WHITE : Color.rgb(225, 230, 232));
             cell.setGravity(Gravity.CENTER_VERTICAL);
             cell.setPadding(4, 0, 4, 0);
             if (header) cell.setBackgroundColor(Color.rgb(55, 75, 82));
-            int width = value.equals("Condition") || (!header && values.length == 7 && value.equals(values[6])) ? 122 : 43;
-            row.addView(cell, new TableRow.LayoutParams(width, header ? 28 : 33));
+            row.addView(cell, new TableRow.LayoutParams(widths[i], header ? 28 : 33));
         }
         table.addView(row);
     }
