@@ -41,8 +41,9 @@ public class FilesView extends View {
     private String status = "";
     private boolean statusIsPath = true;
     private int downItem = -1;
-    private float downY = 0, scrollStart = 0;
+    private float downY = 0, downX = 0, scrollStart = 0;
     private boolean moved = false;
+    private boolean swiped = false;
 
     public FilesView(Context c, File root) {
         super(c);
@@ -208,19 +209,27 @@ public class FilesView extends View {
         float unit = Math.min(getWidth(), getHeight()) / 300f;
         switch (e.getAction()) {
             case MotionEvent.ACTION_DOWN:
+                downX = e.getX();
                 downY = e.getY();
                 scrollStart = scroll;
                 moved = false;
+                swiped = false;
                 downItem = itemAt(e.getY(), unit);
                 break;
             case MotionEvent.ACTION_MOVE:
+                float dx = e.getX() - downX;
                 float dy = e.getY() - downY;
+                if (Math.abs(dx) > 40 * unit && Math.abs(dx) > 1.5f * Math.abs(dy)) swiped = true;
                 if (Math.abs(dy) > 14 * unit) moved = true;
-                if (moved) scroll = Math.max(0, scrollStart - dy);
+                if (!swiped && moved) scroll = Math.max(0, scrollStart - dy);
                 postInvalidate();
                 break;
             case MotionEvent.ACTION_UP:
-                if (!moved && downItem >= 0) tapItem(downItem);
+                if (swiped && e.getX() - downX < 0) {
+                    up();
+                } else if (!moved && downItem >= 0) {
+                    tapItem(downItem);
+                }
                 downItem = -1;
                 postInvalidate();
                 break;
