@@ -225,7 +225,7 @@ public class FilesView extends View {
                 postInvalidate();
                 break;
             case MotionEvent.ACTION_UP:
-                if (swiped && e.getX() - downX < 0) {
+                if (swiped && e.getX() - downX > 0) {
                     up();
                 } else if (!moved && downItem >= 0) {
                     tapItem(downItem);
