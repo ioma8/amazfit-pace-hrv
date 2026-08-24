@@ -22,7 +22,7 @@ A subsequent live watch run remained stable at 85–87 bpm, 31–36 ms RMSSD, an
 
 - [`hrv-probe/`](hrv-probe/) — Android 5.1 watch application and installable APK
 - [`mic-probe/`](mic-probe/) — mic capture app with UI (record/stop, live waveform, speech DSP)
-- [`filebrowser/`](filebrowser/) — simple sdcard file browser app (tap folders, back = up)
+- [`filebrowser/`](filebrowser/) — simple sdcard file browser app (tap folders, swipe right = back, text reader + image viewer on file tap)
 - [`pull-recordings.sh`](pull-recordings.sh) — downloads new watch recordings, clears the device
 - [`captures/raw_ppg.csv`](captures/raw_ppg.csv) — captured regression fixture
 - [`HRV-FINDINGS.md`](HRV-FINDINGS.md) — algorithms, evidence, failures, and limits
