@@ -215,3 +215,54 @@ Notable vendor packages:
 - OTA update format + signature check — determine if `UpdateRomActivity` accepts unsigned images.
 - Verify Dirty COW or another MIPS-compatible kernel vuln against `3.10.14`.
 - ADB auth behavior over TCP (does the watch auto-authorize, or require on-device confirm?).
+
+## 14. Pulse / heart-rate pipeline (HRV feasibility)
+
+Source: decompiled `WearHealth.odex` + `WearSensorService.odex` (jadx 1.5.6) and native `libdataProcess.so`.
+
+### Architecture
+- PPG (green/IR LED + photodiode) is sampled by the **SensorHub co-processor** (`/system/lib/libsensorhub.so`,
+  kernel thread `SensorHub`), not the AP CPU.
+- SensorHub runs the HR algorithm on the MCU and exposes **computed BPM** + events:
+  `sensorhub.hearrate.reach.ratezone`, `sensorhub.heatrate.exceed_target_zone`,
+  `sensorhub.heartrate.calorie_burn.maximum`, `sensorhub.algorithm.*`.
+- Android talks to SensorHub via `IHmSensorHubService` binder + `HmSensorManager` JNI
+  (`nativeConfigureSensorHubAlgorithm`, `nativeStartTransaction`, `readRawBytes`/`writeRawByte` = KLVP byte
+  protocol) and protobuf (`SensorHubProtos`, `KlvpProtocol`).
+- Health binder `IHmHealthDataManagerService` has **one method**: `getHealthData(type, span, since, cb)`
+  → `HmHealthHistoryData` (aggregated daily/weekly: steps, HR, calory, mileage, sit). No raw stream.
+
+### Native HR lib
+`WearHealth/lib/mips/libdataProcess.so` (MIPS32 ELF, stripped, 520 functions) = sleep/HR **analysis**, not raw
+PPG. Operates on BPM value series: `HeartRateClass::filter_hr`, `avg_window`, `std_window`,
+`decisionTreeFiltering`, `featureNormalization`; `SleepClass::sleepAnalyze`; `ShoesClass`/`StepClass` for gait.
+JNI entry: `com.huami.watch.health.sleepanalysis.DataAnalysis`.
+
+### Stock pulse app never reads raw PPG
+- `MeasureHeartRateActivity.init()`: `mSensorManager.getDefaultSensor(21)` — **type 21 = BPM
+  (`android.sensor.heart_rate`, on-change)**, delay 0; displays `mU4HeartRate`.
+- `StepLauncherView`: `getDefaultSensor(19)` (step counter).
+- Full-stock-code grep: **zero** references to raw-PPG type `65538` (only
+  `HmSensorHubConfigManager.TYPE_SPORT_SET_START = 65538`, unrelated).
+
+### Raw PPG sensor (the HRV source)
+From `dumpsys sensorservice` — present in the standard Android sensor list, **unused by stock apps**:
+
+| Handle | Name | Type | Mode |
+|---|---|---|---|
+| 0x0a | PPG Sensor(auto) | 65538 | continuous 5–500 Hz |
+| 0x0b | PPG Sensor(25 mA) | 65538 | continuous 5–500 Hz |
+| 0x0c | PPG Sensor(40 mA) | 65538 | continuous 5–500 Hz |
+| 0x0d | PPG Sensor(55 mA) | 65538 | continuous 5–500 Hz |
+
+fifo 1220 events, `non-wakeUp`, **no `BODY_SENSORS` permission** (only the BPM sensor 0x07 carries it).
+A third-party app can `SensorManager.getDefaultSensor(65538)` + `registerListener`.
+
+### HRV verdict
+- 500 Hz → 2 ms sample spacing; parabolic peak interpolation → ~1–2 ms beat-time precision ⇒ sufficient for
+  time-domain HRV (RMSSD, SDNN, pNN50) and frequency-domain (LF/HF; needs ≥25 Hz, ideal 100–250 Hz).
+- **Proven:** raw PPG present at HAL level, 500 Hz, no permission gate, unused by stock software.
+- **Unproven (needs a test APK):** whether SensorHub firmware streams raw PPG to the AP at 500 Hz on demand;
+  `values[]` layout (ADC count? green vs IR channel?); real rate under load; motion-artifact quality.
+- **Limiter is signal quality, not hardware:** wrist PPG + motion ⇒ artifact rejection via the 500 Hz
+  accelerometer is mandatory for anything beyond resting HRV.
