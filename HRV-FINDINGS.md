@@ -203,7 +203,7 @@ The current source responsibilities are separated as follows:
 - `PpgWaveform.java`: causal display-only filtering; it does not alter analysis data.
 - `HrvView.java`: rendering, score ring, waveform, and breathing pacer.
 
-The breathing pacer is a horizontal bar: green for inhale and blue for exhale. The live waveform uses a separate baseline-removal/smoothing path and RMS-based display scaling so isolated samples do not flatten visible pulses.
+The breathing pacer is a round-screen-safe horizontal bar running at five breaths per minute: green for the six-second inhale and blue for the six-second exhale. The live waveform uses a separate baseline-removal/smoothing path and RMS-based display scaling so isolated samples do not flatten visible pulses.
 
 ## Regression Verification
 

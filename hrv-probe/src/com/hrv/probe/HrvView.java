@@ -108,71 +108,74 @@ public class HrvView extends View {
         int h = getHeight();
         float cx = w / 2f;
         float cy = h / 2f;
-        float r = Math.min(w, h) / 2f - 15;
-        float dp = getResources().getDisplayMetrics().density;
+        float unit = Math.min(w, h) / 300f;
+        float r = Math.min(w, h) / 2f - 14 * unit;
 
+        ringBg.setStrokeWidth(8 * unit);
+        ringFg.setStrokeWidth(8 * unit);
+        wavePaint.setStrokeWidth(2 * unit);
         canvas.drawRect(0, 0, w, h, bg);
 
-        // outer HRV score ring
         ringRect.set(cx - r, cy - r, cx + r, cy + r);
         canvas.drawArc(ringRect, 90, 360, false, ringBg);
         if (haveData && score > 0) {
             float sweep = Math.max(4, score / 100f * 360);
-            int col = score > 60 ? Color.rgb(0, 220, 120) : (score > 30 ? Color.rgb(230, 180, 40) : Color.rgb(230, 70, 60));
+            int col = score > 60 ? Color.rgb(0, 220, 120)
+                : (score > 30 ? Color.rgb(230, 180, 40) : Color.rgb(230, 70, 60));
             ringFg.setColor(col);
             canvas.drawArc(ringRect, -90, sweep, false, ringFg);
         }
 
-        // Horizontal breath pacer: green inhale, blue exhale.
+        // Every content bound is based on the 300 px circular face, not Android
+        // density. Multiplying geometry by density pushed it outside this canvas.
         double tSec = (System.nanoTime() - startTime) / 1e9;
-        double cycle = tSec % 10.0;
-        boolean inhale = cycle < 5.0;
-        double progress = inhale ? cycle / 5.0 : (cycle - 5.0) / 5.0;
-        float barLeft = cx - 108 * dp;
-        float barRight = cx + 108 * dp;
-        float barTop = cy - 78 * dp;
-        float barBottom = barTop + 18 * dp;
+        double cycle = tSec % 12.0;
+        boolean inhale = cycle < 6.0;
+        double progress = inhale ? cycle / 6.0 : (cycle - 6.0) / 6.0;
+        float barLeft = cx - 90 * unit;
+        float barRight = cx + 90 * unit;
+        float barTop = cy - 90 * unit;
+        float barBottom = barTop + 16 * unit;
         ringRect.set(barLeft, barTop, barRight, barBottom);
         pacerFill.setColor(inhale ? Color.argb(55, 0, 220, 120) : Color.argb(55, 70, 150, 255));
         pacerStroke.setColor(inhale ? Color.rgb(0, 220, 120) : Color.rgb(70, 150, 255));
-        canvas.drawRoundRect(ringRect, 9 * dp, 9 * dp, pacerFill);
+        canvas.drawRoundRect(ringRect, 8 * unit, 8 * unit, pacerFill);
         ringRect.right = barLeft + (float) progress * (barRight - barLeft);
         pacerStroke.setStyle(Paint.Style.FILL);
-        canvas.drawRoundRect(ringRect, 9 * dp, 9 * dp, pacerStroke);
-        labelPaint.setTextSize(14 * dp);
+        canvas.drawRoundRect(ringRect, 8 * unit, 8 * unit, pacerStroke);
+        labelPaint.setTextSize(16 * unit);
         canvas.drawText((inhale ? "Breathe in  " : "Breathe out  ")
-            + (int) Math.ceil(inhale ? 5 - cycle : 10 - cycle),
-            cx, barTop - 10 * dp, labelPaint);
+            + (int) Math.ceil(inhale ? 6 - cycle : 12 - cycle),
+            cx, cy - 102 * unit, labelPaint);
 
-        // HR inside the bar area.
         if (haveData && hr > 0) {
-            textBig.setTextSize(58 * dp);
-            canvas.drawText(String.format("%.0f", hr), cx, cy - 4 * dp, textBig);
-            labelPaint.setTextSize(11 * dp);
-            canvas.drawText("BPM", cx, cy + 18 * dp, labelPaint);
+            textBig.setTextSize(52 * unit);
+            canvas.drawText(String.format("%.0f", hr), cx, cy - 18 * unit, textBig);
+            labelPaint.setTextSize(11 * unit);
+            canvas.drawText("BPM", cx, cy - 2 * unit, labelPaint);
         } else {
-            textBig.setTextSize(26 * dp);
-            canvas.drawText("warming up", cx, cy - 2 * dp, textBig);
-            labelPaint.setTextSize(11 * dp);
-            canvas.drawText(seconds + "s", cx, cy + 20 * dp, labelPaint);
+            textBig.setTextSize(24 * unit);
+            canvas.drawText("warming up", cx, cy - 20 * unit, textBig);
+            labelPaint.setTextSize(11 * unit);
+            canvas.drawText(seconds + "s", cx, cy - 3 * unit, labelPaint);
         }
 
-        // HRV score + RMSSD below the pacer
         if (haveData && score > 0) {
-            textMed.setTextSize(26 * dp);
-            int col = score > 60 ? Color.rgb(0, 220, 120) : (score > 30 ? Color.rgb(230, 180, 40) : Color.rgb(230, 70, 60));
+            textMed.setTextSize(24 * unit);
+            int col = score > 60 ? Color.rgb(0, 220, 120)
+                : (score > 30 ? Color.rgb(230, 180, 40) : Color.rgb(230, 70, 60));
             textMed.setColor(col);
-            canvas.drawText(String.format("%.0f%%", score), cx, cy + 34 * dp, textMed);
-            textSmall.setTextSize(12 * dp);
+            canvas.drawText(String.format("%.0f%%", score), cx, cy + 24 * unit, textMed);
+            textSmall.setTextSize(12 * unit);
             textSmall.setColor(Color.rgb(150, 160, 170));
-            canvas.drawText("HRV  RMSSD " + String.format("%.0f", rmssd) + "ms", cx, cy + 52 * dp, textSmall);
+            canvas.drawText("HRV  RMSSD " + String.format("%.0f", rmssd) + "ms",
+                cx, cy + 42 * unit, textSmall);
         }
 
-        // waveform band
-        float waveTop = cy + 62 * dp;
-        float waveBottom = cy + 126 * dp;
-        float waveX0 = cx - 104 * dp;
-        float waveX1 = cx + 104 * dp;
+        float waveTop = cy + 55 * unit;
+        float waveBottom = cy + 101 * unit;
+        float waveX0 = cx - 94 * unit;
+        float waveX1 = cx + 94 * unit;
         canvas.drawLine(waveX0, waveTop, waveX1, waveTop, labelPaint);
         canvas.drawLine(waveX0, waveBottom, waveX1, waveBottom, labelPaint);
 
@@ -197,7 +200,7 @@ public class HrvView extends View {
             }
         }
 
-        textSmall.setTextSize(11 * dp);
-        canvas.drawText("t+" + seconds + "s", cx, cy + 142 * dp, textSmall);
+        textSmall.setTextSize(11 * unit);
+        canvas.drawText("t+" + seconds + "s", cx, cy + 123 * unit, textSmall);
     }
 }

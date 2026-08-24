@@ -153,7 +153,7 @@ public class MainActivity extends Activity {
             int sec = (int) ((System.nanoTime() - start) / 1e9);
             float[] metrics = analyze();
             if (metrics != null) {
-                view.setMetrics(metrics[0], metrics[1], metrics[2], sec);
+                view.setMetrics(metrics[0], metrics[1], metrics[3], sec);
             } else {
                 view.setMetrics(0, 0, 0, sec);
             }
