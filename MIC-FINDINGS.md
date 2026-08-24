@@ -124,14 +124,14 @@ java -cp /tmp/sp com.hrv.mic.SpeechProc in.wav out.wav
 ## Pull workflow
 
 `pull-recordings.sh` (repo root) downloads every WAV from the device to
-`captures/mic-probe/`, prefixes each with the pull timestamp (device timestamp is
-kept), then clears the device folder:
+`captures/mic-probe/` keeping the device file names (the app already stamps each
+recording with its start time), then clears the device folder:
 
 ```bash
 ./pull-recordings.sh            # ADB_SERIAL=xxx for multiple devices
 ```
 
-Result: `captures/mic-probe/20260824_200926_mic_16000_20260824_200859.wav`
+Result: `captures/mic-probe/mic_16000_20260824_200859.wav`
 
 ## Artifacts
 
