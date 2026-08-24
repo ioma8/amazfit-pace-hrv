@@ -5,3 +5,4 @@
 *.zip
 multirate-probe/*.apk
 sport-probe/*.apk
+mic-probe/*.apk
