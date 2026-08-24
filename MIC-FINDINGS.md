@@ -73,10 +73,69 @@ every rate. That was wrong: the search found noise-floor peaks in the expected b
 while the real tone sat elsewhere (e.g. 2756 Hz in the "44100" file). **Always search
 the full spectrum for dominant peaks when validating sample-rate clocks.**
 
+## Capture app with UI (`com.hrv.mic`)
+
+Replaces the headless probe. Round-screen UI (320×300): live waveform, mm:ss
+duration, REC/STOP buttons, save status. Records at 16000 Hz (max 60 s), writes
+two files per capture to `/sdcard/mic-probe/`:
+
+```text
+mic_16000_<yyyyMMdd_HHmmss>.wav       processed (loud, denoised)
+mic_16000_<yyyyMMdd_HHmmss>_raw.wav   untouched capture
+```
+
+Source split:
+
+- `MainActivity.java` — lifecycle, AudioRecord loop, save orchestration
+- `MicView.java` — round-screen rendering + touch (unit-scaled like HrvView)
+- `SpeechProc.java` — pure-Java DSP, no Android deps, offline self-test `main()`
+
+Build/install: `mic-probe/build.sh`, `adb install -r mic-probe/aligned.apk`.
+
+## Speech DSP chain (validated on the 16 kHz speech capture)
+
+| Stage | Parameters | Why |
+|---|---|---|
+| HPF | 4th-order biquad cascade @ 120 Hz | the 0–300 Hz rumble was 20 dB above the speech band |
+| LP | 4th-order biquad cascade @ 5500 Hz | kills hiss; keeps sibilants (4k cut was cleaner but duller) |
+| AGC | target −18 dBFS, max +34 dB, 15 ms attack / 400 ms release | speech was at −41 dBFS RMS (peak-normalization alone left it quiet — the one loud spike set the gain) |
+| Noise gate | close < −32 dBFS to −26 dB mute, 20 ms close / 200 ms open | the AGC pumped pause noise to −40 dBFS; gate makes pauses −65 dBFS |
+| Limiter | tanh at 0.92 | zero clipping, peak −1 dBFS |
+
+Measured on the talking capture: RMS −41.4 → −21.8 dBFS, pauses −40 → −65 dBFS,
+SNR(300–3400 vs 5–8 kHz) 6.5 → 8.9 dB, 0 clipped samples, pitch intact.
+
+**Rejected approaches** (all measured): peak normalization (spike-set gain leaves
+speech quiet), RMS normalization (same), minimum-statistics spectral subtraction
+(no measurable effect on this file — the noise is gated, not subtractable),
+HPF below 120 Hz (rumble not attenuated), LP at 4000 (dull sibilants).
+
+**Port verification**: `SpeechProc.java` reproduces the Python reference
+**bit-identical** (max sample diff = 0):
+
+```bash
+javac --release 8 -d /tmp/sp src/com/hrv/mic/SpeechProc.java
+java -cp /tmp/sp com.hrv.mic.SpeechProc in.wav out.wav
+```
+
+## Pull workflow
+
+`pull-recordings.sh` (repo root) downloads every WAV from the device to
+`captures/mic-probe/`, prefixes each with the pull timestamp (device timestamp is
+kept), then clears the device folder:
+
+```bash
+./pull-recordings.sh            # ADB_SERIAL=xxx for multiple devices
+```
+
+Result: `captures/mic-probe/20260824_200926_mic_16000_20260824_200859.wav`
+
 ## Artifacts
 
-- Probe app: `mic-probe/` (records 5 s at each declared rate to `/sdcard/mic-probe/`)
-- Captured fixtures: `captures/mic-probe/` (tone run), `captures/mic-probe-noise/` (speech run)
+- Capture app: `mic-probe/` (build script, APK output, source)
+- Pull/download: `pull-recordings.sh`
+- Processed demo: `captures/mic_16000_processed_final.wav` (validated chain)
+- Captured fixtures: `captures/mic-probe/` (tone runs), `captures/mic-probe-noise/` (speech run)
 - Audio HAL policy: `/system/etc/audio_policy.conf` declares `8000|16000|11025|44100`
   for the builtin mic — declaration ≠ reality; the hardware is 16000 only.
 

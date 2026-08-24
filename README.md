@@ -21,7 +21,8 @@ A subsequent live watch run remained stable at 85–87 bpm, 31–36 ms RMSSD, an
 ## Repository map
 
 - [`hrv-probe/`](hrv-probe/) — Android 5.1 watch application and installable APK
-- [`mic-probe/`](mic-probe/) — mic capture probe (records at all declared rates)
+- [`mic-probe/`](mic-probe/) — mic capture app with UI (record/stop, live waveform, speech DSP)
+- [`pull-recordings.sh`](pull-recordings.sh) — downloads new watch recordings, clears the device
 - [`captures/raw_ppg.csv`](captures/raw_ppg.csv) — captured regression fixture
 - [`HRV-FINDINGS.md`](HRV-FINDINGS.md) — algorithms, evidence, failures, and limits
 - [`PACE-FINDINGS.md`](PACE-FINDINGS.md) — device and sensor-hub reverse engineering
@@ -45,6 +46,26 @@ Expected output:
 ```text
 HrvAnalyzer checks passed
 ```
+
+## Mic capture (see [`MIC-FINDINGS.md`](MIC-FINDINGS.md))
+
+The watch's digital mic runs at one native rate, **16000 Hz** — the other declared
+rates (8000/11025/44100) are decimated or mislabeled (pitch-warped) and unusable.
+The mic app records at 16 kHz and applies a validated speech chain
+(HPF 120 Hz → LP 5500 Hz → AGC → noise gate → tanh limiter) so speech is loud and
+pauses are silent. Build with `mic-probe/build.sh`, install the APK, tap REC/STOP,
+then pull the recordings:
+
+```bash
+mic-probe/build.sh
+adb install -r mic-probe/aligned.apk
+adb shell am start -n com.hrv.mic/.MainActivity   # tap REC, speak, tap STOP
+./pull-recordings.sh                                # downloads + clears device
+```
+
+Each pull creates `captures/mic-probe/<pull-timestamp>_mic_16000_<rec-time>.wav`
+(processed) and `..._raw.wav` (unprocessed). The DSP is pure Java
+(`SpeechProc.java`), verified bit-identical to the Python prototype.
 
 ## Important limits
 
