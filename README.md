@@ -22,7 +22,10 @@ A subsequent live watch run remained stable at 85–87 bpm, 31–36 ms RMSSD, an
 
 - [`hrv-probe/`](hrv-probe/) — Android 5.1 watch application and installable APK
 - [`weather-probe/`](weather-probe/) — Ostrava hourly-forecast watch app (Wi-Fi + offline cache)
-- [`wifi-provision/`](wifi-provision/) — one-shot Wi-Fi network provisioning helper
+- [`breathe-probe/`](breathe-probe/) — cyclic-sighing stress exercise (validated protocol)
+- [`metronome-probe/`](metronome-probe/) — vibration metronome with BPM presets
+- [`radar-probe/`](radar-probe/) — CZ radar on a map, with animation
+- [`captures/raw_ppg.csv`](captures/raw_ppg.csv) — captured regression fixture
 - [`captures/raw_ppg.csv`](captures/raw_ppg.csv) — captured regression fixture
 - [`HRV-FINDINGS.md`](HRV-FINDINGS.md) — algorithms, evidence, failures, and limits
 - [`PACE-FINDINGS.md`](PACE-FINDINGS.md) — device and sensor-hub reverse engineering
@@ -169,6 +172,40 @@ adb shell am start -n com.wifi.provision/.MainActivity   # adds networks, delete
 Currently saved on the device: `Vodafone-8614` (netId 0), `RNT` (netId 1).
 
 Credentials extraction from macOS: AirPort passwords live in the System keychain; grant the CLI once with `sudo security set-key-partition-list -S apple-tool:,apple: -s -k "" /Library/Keychains/System.keychain`, then `security find-generic-password -w -a "<ssid>" -s AirPort` (or `/tmp/dump-wifi.sh`).
+
+## Wrist tools (`breathe-probe/`, `metronome-probe/`, `radar-probe/`)
+
+Three minimalist utilities, same build/install flow as `weather-probe`.
+
+### Breathe — cyclic sighing
+The best-validated breathing pattern for acute stress reduction (Balban et al. 2023,
+*Cell Reports Medicine*, PMID 36630953): two nasal inhales + long slow exhale,
+~1:2 ratio. Pacer: 2s in → 2s top-up → 8s sigh out, 25 sighs (~5 min, as studied).
+No vibration. Tap to pause/resume/restart; screen stays on.
+
+### Metronome
+Vibration metronome, 30–240 BPM, preset rows (60–200), first beat of each 4/4 bar
+accented (90 ms vs 30 ms tick). `Start` toggles to `Stop`. Screen stays on.
+
+### Radar
+CZ radar composite, same layer stack as the CHMÚ page:
+`opendata.chmi.cz/.../maxz/png/` frames over `produkty.chmi.cz` terrain
+(`oro`), underlay (`und3`) and border (`hranice`) layers. Latest 24 frames
+(~2 h) are composited at 340×230 (keeps ~24 bitmaps ≈ 8 MB on the MIPS heap),
+static layers cached. Latest still by default; tap to loop frames at 100 ms
+(bourky.cz style), tap again for the still. Each frame shows its local time
+(UTC + device offset) bottom-right. Offline: last composite cached.
+
+## App conventions (all watch apps)
+
+- Kill on pause: `onPause()` runs cleanup, then `finish()` +
+  `Process.killProcess(Process.myPid())` — no zombie processes (weather-probe
+  additionally disables Wi-Fi).
+- Screen awake while visible: `FLAG_KEEP_SCREEN_ON` on the window (no permission).
+- Vibration: this ROM throws a cosmetic `RuntimeException("Vibrator")` on a
+  background thread *after* vibrating — wrap in try/catch, keep going.
+- Bitmaps: always decode with `inSampleSize` to display resolution; this watch's
+  heap can't hold full-res layer stacks.
 
 ## Launcher compatibility gotchas
 

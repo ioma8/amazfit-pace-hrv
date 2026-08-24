@@ -6,7 +6,9 @@ import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Process;
 import android.util.Log;
+import android.view.WindowManager;
 import android.widget.TextView;
 
 import java.io.BufferedReader;
@@ -26,6 +28,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         TextView out = new TextView(this);
         out.setTextSize(12);
         out.setPadding(10, 10, 10, 10);
@@ -69,6 +72,13 @@ public class MainActivity extends Activity {
             log.append("error: ").append(t).append('\n');
         }
         out.setText(log.toString());
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        finish();
+        Process.killProcess(Process.myPid());
     }
 
     private static final Pattern ENTRY = Pattern.compile(
