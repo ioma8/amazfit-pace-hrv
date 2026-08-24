@@ -20,6 +20,21 @@ import android.util.Log;
  *  back button goes up (exits at root). */
 public class FilesView extends View {
     private static final String TAG = "Files";
+
+    public interface Listener { void onOpenFile(File f); }
+    private Listener listener;
+    public void setListener(Listener l) { listener = l; }
+
+    private static final java.util.Set<String> TEXT_EXT = new java.util.HashSet<String>(
+        java.util.Arrays.asList("txt", "log", "csv", "md", "json", "xml", "html", "htm",
+        "ini", "conf", "cfg", "properties", "prop", "yml", "yaml", "sh", "py", "c", "cpp",
+        "h", "hpp", "java", "kt", "kts", "gradle", "aidl", "csv", "plist", "xml"));
+
+    static boolean isTextFile(File f) {
+        String n = f.getName().toLowerCase();
+        int dot = n.lastIndexOf('.');
+        return dot >= 0 && TEXT_EXT.contains(n.substring(dot + 1));
+    }
     private final Paint bg = new Paint();
     private final Paint pathText = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint sep = new Paint();
@@ -133,6 +148,8 @@ public class FilesView extends View {
         if (f.isDirectory()) {
             cur = f;
             reload();
+        } else if (listener != null && isTextFile(f) && f.length() <= 512 * 1024) {
+            listener.onOpenFile(f);
         } else {
             status = f.getName() + "  " + fmt(f.length());
             statusIsPath = false;
