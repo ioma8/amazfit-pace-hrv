@@ -90,11 +90,11 @@ abs((short_1 + short_2) - median_ibi) <= 0.25 * median_ibi
 
 Removing invalid intervals before constructing the score timeline shortened elapsed time and shifted spectral power. The current implementation retains real cumulative time across rejected intervals and interpolates between valid NN measurements on that timeline.
 
-### Shutdown could run one final analysis
+### Lifecycle startup could outlive shutdown
 
-If `onPause()` stopped measurement while the analysis thread was sleeping, the loop completed one more analysis and emitted a metric log after `stopped: LED off`.
+The original background startup could acquire the wake lock, enable the LED, and register PPG after `onPause()` had already completed cleanup. Initialization failures and a blocked diagnostic response reader had similar lifetime leaks.
 
-The loop now checks `running` immediately after waking and exits before analysis. Sensor unregistration, HR LED shutdown, handler-thread shutdown, and wake-lock release remain idempotent.
+V20 makes the session worker own every resource inside `try/finally`. Startup and cleanup publish resources under one lock, cancellation is checked around every blocking boundary, empty/failed PPG registration is fatal, and launcher re-entry always creates a fresh activity. The unused response reader and all file logging were removed. Immediate-exit device testing shows `allDayHR=true` followed by `stopped: LED off` with no late PPG registration; normal re-entry registers PPG again and releases the wake lock on Back.
 
 ## Current Signal Processing
 
@@ -217,13 +217,15 @@ The score is withheld until at least 25 seconds of valid physiological span is a
 
 The current source responsibilities are separated as follows:
 
-- `MainActivity.java`: Android lifecycle, sensor-hub control, and orchestration.
-- `HrvSamples.java`: synchronized raw PPG storage and window snapshots.
-- `HrvAnalyzer.java`: pure beat extraction, artifact handling, metrics, and score.
+- `MainActivity.java`: lifecycle-safe session ownership, sensor-hub control, and orchestration.
+- `HrvSamples.java`: synchronized fixed-size primitive ring buffers and chronological window snapshots.
+- `HrvAnalyzer.java`: pure beat extraction, artifact handling, metrics, score availability, and scoring.
 - `PpgWaveform.java`: causal display-only filtering; it does not alter analysis data.
-- `HrvView.java`: rendering, score ring, waveform, and breathing pacer.
+- `HrvView.java`: rendering, score ring, waveform, score-building state, and breathing pacer.
 
 The breathing pacer is a round-screen-safe horizontal bar running at five breaths per minute: green for the six-second inhale and blue for the six-second exhale. The live waveform uses a separate baseline-removal/smoothing path and RMS-based display scaling so isolated samples do not flatten visible pulses.
+
+The detector accepts real 160–170 bpm pulse spacing but rejects unsupported 180 bpm data instead of aliasing it to half-rate. Coherence availability is distinct from a valid `0%`, so RMSSD remains visible while the score is building or legitimately zero. The application retains only the latest 1,400 raw samples in memory and writes neither raw PPG nor diagnostic files.
 
 ## Regression Verification
 
@@ -276,6 +278,6 @@ The checks protect:
 - Production APK: `hrv-probe/hrv-probe.apk`
 - Raw captured fixture: `captures/raw_ppg.csv`
 - Analyzer: `hrv-probe/src/com/hrv/probe/HrvAnalyzer.java`
-- Regression check: `hrv-probe/test/com/hrv/probe/HrvAnalyzerTest.java`
+- Regression checks: `hrv-probe/test/com/hrv/probe/HrvAnalyzerTest.java` and `hrv-probe/test/com/hrv/probe/HrvSamplesTest.java`
 - Debugging audit trail: `HYPOTHESES.csv`
 - Broader watch reverse-engineering findings: `PACE-FINDINGS.md`

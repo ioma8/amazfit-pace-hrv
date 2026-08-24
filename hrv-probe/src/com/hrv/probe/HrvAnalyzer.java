@@ -8,6 +8,7 @@ import java.util.List;
 /** Pure 25 Hz PPG beat extraction and emwave-compatible resonance scoring. */
 public final class HrvAnalyzer {
     private static final int[] SMOOTH_KERNEL = new int[]{1, 6, 15, 20, 15, 6, 1};
+    private static final double REFRACTORY_SECONDS = 0.28;
     private HrvAnalyzer() {}
 
     public static final class Result {
@@ -15,14 +16,17 @@ public final class HrvAnalyzer {
         public final float rmssdMs;
         public final float sdnnMs;
         public final float score;
+        public final boolean scoreAvailable;
         public final int cleanCount;
         public final int totalCount;
 
-        Result(double hr, double rmssd, double sdnn, double score, int clean, int total) {
+        Result(double hr, double rmssd, double sdnn, double score,
+               boolean scoreAvailable, int clean, int total) {
             this.hr = (float) hr;
             this.rmssdMs = (float) (rmssd * 1000.0);
             this.sdnnMs = (float) (sdnn * 1000.0);
             this.score = (float) score;
+            this.scoreAvailable = scoreAvailable;
             this.cleanCount = clean;
             this.totalCount = total;
         }
@@ -81,8 +85,10 @@ public final class HrvAnalyzer {
 
         // emwave-utils: LF normalized power multiplied by log-scaled LF peak
         // concentration. This is resonance strength, not an RMSSD map.
-        double score = Math.max(0.0, Math.min(100.0, resonanceScore(intervals.values, intervals.valid)));
-        return new Result(60.0 / mean, rmssd, sdnn, score, intervals.validCount, ibis.size());
+        ScoreResult resonance = resonanceScore(intervals.values, intervals.valid);
+        double score = Math.max(0.0, Math.min(100.0, resonance.value));
+        return new Result(60.0 / mean, rmssd, sdnn, score, resonance.available,
+            intervals.validCount, ibis.size());
     }
 
     private static final class CleanIntervals {
@@ -167,7 +173,7 @@ public final class HrvAnalyzer {
         // dicrotic peaks without deleting genuine tachycardic beats.
         List<Double> peaks = new ArrayList<Double>();
         for (double candidate : candidates) {
-            if (peaks.isEmpty() || (candidate - peaks.get(peaks.size() - 1)) * dt >= 0.38) {
+            if (peaks.isEmpty() || (candidate - peaks.get(peaks.size() - 1)) * dt >= REFRACTORY_SECONDS) {
                 peaks.add(candidate);
             } else {
                 int old = (int) Math.round(peaks.get(peaks.size() - 1));
@@ -284,7 +290,17 @@ public final class HrvAnalyzer {
         return result;
     }
 
-    private static double resonanceScore(List<Double> input, List<Boolean> valid) {
+    private static final class ScoreResult {
+        final double value;
+        final boolean available;
+
+        ScoreResult(double value, boolean available) {
+            this.value = value;
+            this.available = available;
+        }
+    }
+
+    private static ScoreResult resonanceScore(List<Double> input, List<Boolean> valid) {
         List<Double> clean = new ArrayList<Double>();
         List<Double> cleanTimes = new ArrayList<Double>();
         double elapsed = 0.0;
@@ -295,22 +311,22 @@ public final class HrvAnalyzer {
                 cleanTimes.add(elapsed);
             }
         }
-        if (clean.size() < 16) return 0.0;
+        if (clean.size() < 16) return new ScoreResult(0.0, false);
         double[] time = new double[clean.size()];
         double start = cleanTimes.get(0);
         for (int i = 0; i < time.length; i++) time[i] = cleanTimes.get(i) - start;
         // Keep real elapsed time across rejected intervals; closing those gaps
         // would shift spectral power and inflate coherence.
         double span = time[time.length - 1] - time[0];
-        if (span < 25.0) return 0.0;
+        if (span < 25.0) return new ScoreResult(0.0, false);
         int npts = (int) (span * 4.0);
-        if (npts < 16) return 0.0;
+        if (npts < 16) return new ScoreResult(0.0, false);
         double[] yi = new double[npts];
         int j = 0;
         for (int k = 0; k < npts; k++) {
             double t = k / 4.0;
             while (j + 1 < time.length && time[j + 1] < t) j++;
-            if (j + 1 >= time.length) return 0.0;
+            if (j + 1 >= time.length) return new ScoreResult(0.0, false);
             double f = (t - time[j]) / (time[j + 1] - time[j]);
             yi[k] = clean.get(j) + (clean.get(j + 1) - clean.get(j)) * f;
         }
@@ -332,11 +348,12 @@ public final class HrvAnalyzer {
                 hf += power;
             }
         }
-        if (lf + hf <= 0.0 || lfPowers.isEmpty()) return 0.0;
+        if (lfPowers.isEmpty()) return new ScoreResult(0.0, false);
+        if (lf + hf <= 0.0) return new ScoreResult(0.0, true);
         double medianLf = median(lfPowers);
         double concentration = medianLf > 0.0 ? Math.max(0.0, Math.min(1.0,
             Math.log10(Math.max(1.0, peak / medianLf)) / 2.0)) : 0.0;
-        return lf / (lf + hf) * concentration * 100.0;
+        return new ScoreResult(lf / (lf + hf) * concentration * 100.0, true);
     }
 
     private static void detrendHann(double[] values) {

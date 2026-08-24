@@ -27,22 +27,91 @@ A subsequent live watch run remained stable at 85–87 bpm, 31–36 ms RMSSD, an
 - [`SUMMARY.md`](SUMMARY.md) — concise project findings
 - [`firmware/`](firmware/) and [`firmware-tools/`](firmware-tools/) — sensor-hub research artifacts
 
-## Local analyzer check
+## Local checks
 
 ```bash
 rm -rf /tmp/hrv-tests
 javac -d /tmp/hrv-tests \
   hrv-probe/src/com/hrv/probe/HrvAnalyzer.java \
-  hrv-probe/test/com/hrv/probe/HrvAnalyzerTest.java
-java -cp /tmp/hrv-tests \
-  com.hrv.probe.HrvAnalyzerTest captures/raw_ppg.csv
+  hrv-probe/src/com/hrv/probe/HrvSamples.java \
+  hrv-probe/test/com/hrv/probe/HrvAnalyzerTest.java \
+  hrv-probe/test/com/hrv/probe/HrvSamplesTest.java
+java -cp /tmp/hrv-tests com.hrv.probe.HrvAnalyzerTest captures/raw_ppg.csv
+java -cp /tmp/hrv-tests com.hrv.probe.HrvSamplesTest
 ```
 
 Expected output:
 
 ```text
 HrvAnalyzer checks passed
+HrvSamples checks passed
 ```
+
+## Build, sign, and install the watch app
+
+Prerequisites: JDK 8+ (`javac`, `jar`, `keytool`), Android SDK platform 35, Build Tools 36.0.0, `adb`, and `zip`. Set `ANDROID_SDK_ROOT` if the SDK is not under `~/Library/Android/sdk`.
+
+From the repository root:
+
+```bash
+export ANDROID_SDK_ROOT=\"${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}\"
+BT=\"$ANDROID_SDK_ROOT/build-tools/36.0.0\"
+ANDROID_JAR=\"$ANDROID_SDK_ROOT/platforms/android-35/android.jar\"
+OUT=/tmp/pace-hrv-build
+KEYSTORE=\"$HOME/.android/debug.keystore\"
+
+rm -rf \"$OUT\"
+mkdir -p \"$OUT/classes\" \"$OUT/dex\"
+
+find hrv-probe/src -name '*.java' -print0 |
+  xargs -0 javac -source 8 -target 8 -classpath \"$ANDROID_JAR\" -d \"$OUT/classes\"
+jar cf \"$OUT/classes.jar\" -C \"$OUT/classes\" .
+\"$BT/d8\" --output \"$OUT/dex\" \"$OUT/classes.jar\"
+
+\"$BT/aapt\" package -f \
+  -M hrv-probe/AndroidManifest.xml \
+  -S hrv-probe/res \
+  -I \"$ANDROID_JAR\" \
+  -F \"$OUT/unsigned.apk\"
+zip -j \"$OUT/unsigned.apk\" \"$OUT/dex/classes.dex\"
+\"$BT/zipalign\" -f 4 \"$OUT/unsigned.apk\" \"$OUT/aligned.apk\"
+```
+
+Create a local debug signing key once:
+
+```bash
+mkdir -p \"$(dirname \"$KEYSTORE\")\"
+if [ ! -f \"$KEYSTORE\" ]; then
+  keytool -genkeypair -v \
+    -keystore \"$KEYSTORE\" -storepass android \
+    -alias androiddebugkey -keypass android \
+    -dname 'CN=Android Debug,O=Android,C=US' \
+    -keyalg RSA -validity 10000
+fi
+```
+
+Sign and verify:
+
+```bash
+\"$BT/apksigner\" sign \
+  --ks \"$KEYSTORE\" \
+  --ks-pass pass:android \
+  --key-pass pass:android \
+  --out hrv-probe/hrv-probe.apk \
+  \"$OUT/aligned.apk\"
+\"$BT/apksigner\" verify --verbose hrv-probe/hrv-probe.apk
+\"$BT/aapt\" dump badging hrv-probe/hrv-probe.apk
+```
+
+Install and launch over ADB:
+
+```bash
+adb devices
+adb install -r hrv-probe/hrv-probe.apk
+adb shell am start -n com.hrv.probe/.MainActivity
+```
+
+Android requires updates to use the same signing key. If another key signed the installed copy, `adb install -r` returns `INSTALL_FAILED_UPDATE_INCOMPATIBLE`; uninstall that copy first with `adb uninstall com.hrv.probe`, then install again.
 
 ## Important limits
 

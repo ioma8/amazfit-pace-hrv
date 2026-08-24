@@ -11,8 +11,9 @@ public final class HrvAnalyzerTest {
         capturedPpgMatchesVisiblePulseTiming(capture);
         capturedMetricsIgnoreOpticalNuisance(capture);
         syntheticSteadyAndVariablePulseStayDistinct();
+        highHeartRatesDoNotAlias();
         burstyCallbacksDoNotInflateHrv();
-        shortWindowProducesMetrics();
+        shortWindowProducesMetricsBeforeScore();
         System.out.println("HrvAnalyzer checks passed");
     }
 
@@ -38,6 +39,7 @@ public final class HrvAnalyzerTest {
         between(result.rmssdMs, 41.0f, 43.0f, "captured RMSSD");
         between(result.sdnnMs, 70.0f, 72.5f, "captured SDNN");
         between(result.score, 61.0f, 67.0f, "captured coherence score");
+        require(result.scoreAvailable, "captured coherence score was unavailable");
 
         float minimumScore = Float.POSITIVE_INFINITY;
         float maximumScore = Float.NEGATIVE_INFINITY;
@@ -106,20 +108,52 @@ public final class HrvAnalyzerTest {
         between(variable.hr, 70.0f, 75.0f, "variable HR");
         require(variable.rmssdMs > steady.rmssdMs + 15.0f,
             "real variability was suppressed: " + variable.rmssdMs);
-        require(variable.score >= 0.0f && variable.score <= 100.0f, "score outside 0..100");
+        require(steady.scoreAvailable && variable.scoreAvailable,
+            "long synthetic window had no coherence result");
+        require(variable.score >= 0.0f && variable.score <= 100.0f,
+            "score outside 0..100");
     }
+
+    private static void highHeartRatesDoNotAlias() {
+        HrvAnalyzer.Result at160 = syntheticAtRate(160.0);
+        HrvAnalyzer.Result at170 = syntheticAtRate(170.0);
+        HrvAnalyzer.Result at180 = syntheticAtRate(180.0);
+        require(at160 != null, "160 bpm was rejected");
+        require(at170 != null, "170 bpm was rejected");
+        between(at160.hr, 158.0f, 162.0f, "160 bpm boundary");
+        between(at170.hr, 168.0f, 172.0f, "170 bpm boundary");
+        require(at180 == null, "unsupported 180 bpm aliased to a lower rate");
+    }
+
+    private static HrvAnalyzer.Result syntheticAtRate(double heartRate) {
+        int count = 1400;
+        double fs = 25.4;
+        double phase = 0.0;
+        float[] values = new float[count];
+        long[] times = new long[count];
+        for (int i = 0; i < count; i++) {
+            times[i] = (long) (i * 1_000_000_000.0 / fs);
+            phase += 2.0 * Math.PI * heartRate / (60.0 * fs);
+            values[i] = (float) (34000.0
+                + 900.0 * Math.max(0.0, Math.sin(phase))
+                + 70.0 * Math.sin(2.0 * phase));
+        }
+        return HrvAnalyzer.analyze(values, times);
+    }
+
     private static void burstyCallbacksDoNotInflateHrv() {
         HrvAnalyzer.Result uniform = synthetic(800, 7.0, false, false);
         HrvAnalyzer.Result bursty = synthetic(800, 7.0, false, true);
         require(uniform != null && bursty != null, "bursty callback simulation was rejected");
         require(Math.abs(bursty.hr - uniform.hr) < 0.2f, "callback batching changed HR");
-        require(Math.abs(bursty.rmssdMs - uniform.rmssdMs) < 0.5f, "callback batching changed RMSSD");
+        require(Math.abs(bursty.rmssdMs - uniform.rmssdMs) < 0.5f,
+            "callback batching changed RMSSD");
     }
 
-
-    private static void shortWindowProducesMetrics() {
+    private static void shortWindowProducesMetricsBeforeScore() {
         HrvAnalyzer.Result result = synthetic(340, 5.0, false);
         require(result != null, "12-second warmup window produced no metrics");
+        require(!result.scoreAvailable, "short window exposed an unreliable score");
     }
 
     private static HrvAnalyzer.Result synthetic(int count, double modulation, boolean addSpikes) {

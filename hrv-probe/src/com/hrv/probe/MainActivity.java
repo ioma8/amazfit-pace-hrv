@@ -14,46 +14,49 @@ import android.os.PowerManager;
 import android.util.Log;
 import android.view.WindowManager;
 
-import com.huami.watch.klvp.KlvpResponse;
 import com.huami.watch.klvp.KlvpStream;
-import com.huami.watch.klvp.WakelockCallback;
 
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileWriter;
 import java.util.List;
 
 public class MainActivity extends Activity {
     private static final String TAG = "HrvProbe";
-    private static final int WIN = 1400; // ~55s window at 25.4 Hz
-    private final StringBuilder sb = new StringBuilder();
-    private HrvView view;
-    private volatile boolean running = true;
-    private boolean cleaned = false;
-    private final HrvSamples samples = new HrvSamples();
-    private SensorManager sm;
-    private SensorEventListener listener;
-    private HandlerThread ht;
-    private PowerManager.WakeLock wl;
+    private static final int WIN = 1400; // ~55s window at 25.2 Hz
+
+    private final Object sessionLock = new Object();
+    private final HrvSamples samples = new HrvSamples(WIN);
     private final PpgWaveform waveform = new PpgWaveform();
 
+    private HrvView view;
+    private volatile boolean running;
+    private boolean stopReported;
+    private boolean hrEnableAttempted;
+    private Thread sessionThread;
+    private SensorManager sensorManager;
+    private SensorEventListener listener;
+    private HandlerThread sensorThread;
+    private PowerManager.WakeLock wakeLock;
+
     @Override
-    protected void onCreate(Bundle b) {
-        super.onCreate(b);
+    protected void onCreate(Bundle state) {
+        super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
             | WindowManager.LayoutParams.FLAG_FULLSCREEN);
         view = new HrvView(this);
         setContentView(view);
-        new Thread(new Runnable() {
+        running = true;
+        sessionThread = new Thread(new Runnable() {
+            @Override
             public void run() {
                 runHrv();
             }
-        }).start();
+        }, "hrv-session");
+        sessionThread.start();
     }
 
     @Override
     protected void onPause() {
         stopAll();
+        if (!isFinishing()) finish(); // launcher re-entry always creates a fresh session
         super.onPause();
     }
 
@@ -63,146 +66,197 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
-    // idempotent: stops measurement + hub LED on any exit path (back/home/button)
-    private synchronized void stopAll() {
-        if (cleaned) return;
-        cleaned = true;
+    private void stopAll() {
         running = false;
-        try {
-            if (listener != null && sm != null) sm.unregisterListener(listener);
-        } catch (Throwable t) {
+        Thread worker;
+        synchronized (sessionLock) {
+            worker = sessionThread;
         }
-        try {
-            if (ht != null) ht.quitSafely();
-        } catch (Throwable t) {
+        if (worker != null && worker != Thread.currentThread()) worker.interrupt();
+        cleanupResources();
+
+        boolean report;
+        synchronized (sessionLock) {
+            report = !stopReported;
+            stopReported = true;
         }
-        try {
-            KlvpStream.sendRequestToSensorHub('a', (short) 0, (byte) 0, (byte) 1, (byte) 0, (short) 4,
-                new byte[]{(byte) 0xD0, 0x02, 0x00});
-        } catch (Throwable t) {
+        if (report) {
+            log("--- stopped: LED off ---");
         }
-        try {
-            if (wl != null && wl.isHeld()) wl.release();
-        } catch (Throwable t) {
-        }
-        log("--- stopped: LED off ---");
-        writeOut();
     }
-
     private void runHrv() {
-        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "hrvprobe");
-        wl.acquire();
-        log("=== V19 LIVE HRV (morphology-calibrated) ===");
-        log("model=" + Build.MODEL + " sdk=" + Build.VERSION.SDK_INT);
+        boolean failed = false;
+        try {
+            if (!acquireWakeLock()) return;
+            log("=== V20 LIVE HRV (lifecycle-safe) ===");
+            log("model=" + Build.MODEL + " sdk=" + Build.VERSION.SDK_INT);
+            if (!enableHeartMeasurement()) return;
+            if (!sleepWhileRunning(3000)) return;
+            if (!registerPpg()) return;
 
-        Thread responder = new Thread(new Runnable() {
-            public void run() {
-                try {
-                    KlvpResponse[] rs = KlvpStream.readResponses(new WakelockCallback() {
-                        public void WakelockCallback() {
-                        }
-                    });
-                    if (rs != null) {
-                        for (KlvpResponse r : rs) log("  [klvp] " + r);
+            long start = System.nanoTime();
+            int lastLog = 0;
+            while (sleepWhileRunning(2000)) {
+                int seconds = (int) ((System.nanoTime() - start) / 1e9);
+                HrvAnalyzer.Result result = analyze();
+                if (result != null) {
+                    view.setMetrics(result.hr, result.rmssdMs, result.score,
+                        result.scoreAvailable, seconds);
+                } else {
+                    view.setMetrics(0, 0, 0, false, seconds);
+                }
+                if (seconds - lastLog >= 15) {
+                    lastLog = seconds;
+                    if (result == null) {
+                        log("t+" + seconds + "s collecting (n=" + samples.size() + ")");
+                    } else {
+                        String score = result.scoreAvailable
+                            ? String.format("%.0f%%", result.score) : "building";
+                        log(String.format(
+                            "t+%ds HR=%.1f RMSSD=%.1fms SDNN=%.1fms score=%s clean=%d/%d",
+                            seconds, result.hr, result.rmssdMs, result.sdnnMs, score,
+                            result.cleanCount, result.totalCount));
                     }
-                } catch (Throwable t) {
-                    log("  [klvp] read EXC: " + t);
                 }
             }
-        }, "klvp-reader");
-        responder.setDaemon(true);
-        responder.start();
-
-        log("--- allDayHR=true ---");
-        try {
-            KlvpStream.sendRequestToSensorHub('a', (short) 0, (byte) 0, (byte) 1, (byte) 0, (short) 4,
-                new byte[]{(byte) 0xD0, 0x02, 0x01});
-        } catch (Throwable t) {
-            log("  klvp send EXC: " + t);
+        } catch (Throwable error) {
+            failed = running;
+            log("session failed: " + error);
+        } finally {
+            running = false;
+            cleanupResources();
+            synchronized (sessionLock) {
+                if (sessionThread == Thread.currentThread()) sessionThread = null;
+            }
+            if (failed && !isFinishing()) {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (!isFinishing()) finish();
+                    }
+                });
+            }
         }
-        sleep(3000);
+    }
 
-        sm = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
-        ht = new HandlerThread("ppg");
-        ht.start();
-        Handler h = new Handler(ht.getLooper());
-        List<Sensor> ppgs = sm.getSensorList(65538);
-        Sensor ppg = ppgs.get(0);
+    private boolean acquireWakeLock() {
+        PowerManager manager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        if (manager == null) throw new IllegalStateException("PowerManager unavailable");
+        PowerManager.WakeLock candidate = manager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK, "hrvprobe");
+        synchronized (sessionLock) {
+            if (!running) return false;
+            wakeLock = candidate;
+            wakeLock.acquire();
+            return true;
+        }
+    }
 
-        listener = new SensorEventListener() {
+    private boolean enableHeartMeasurement() {
+        synchronized (sessionLock) {
+            if (!running) return false;
+            hrEnableAttempted = true;
+            log("--- allDayHR=true ---");
+            KlvpStream.sendRequestToSensorHub('a', (short) 0, (byte) 0, (byte) 1,
+                (byte) 0, (short) 4, new byte[]{(byte) 0xD0, 0x02, 0x01});
+            return true;
+        }
+    }
+
+    private boolean registerPpg() {
+        SensorManager manager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        if (manager == null) throw new IllegalStateException("SensorManager unavailable");
+        List<Sensor> sensors = manager.getSensorList(65538);
+        if (sensors.isEmpty()) throw new IllegalStateException("PPG sensor unavailable");
+        final Sensor ppg = sensors.get(0);
+        final HandlerThread thread = new HandlerThread("ppg");
+        final SensorEventListener candidate = new SensorEventListener() {
             @Override
-            public void onSensorChanged(SensorEvent e) {
-                float v = e.values[0];
-                samples.add(v, System.nanoTime());
-                view.pushWave(waveform.filter(v));
+            public void onSensorChanged(SensorEvent event) {
+                float value = event.values[0];
+                samples.add(value, System.nanoTime());
+                view.pushWave(waveform.filter(value));
             }
 
             @Override
             public void onAccuracyChanged(Sensor sensor, int accuracy) {
             }
         };
-        boolean ok = sm.registerListener(listener, ppg, 2000, h);
-        log("ppg register=" + ok);
 
-        long start = System.nanoTime();
-        int lastLog = 0;
-        while (running) {
-            sleep(2000);
-            if (!running) break;
-            int sec = (int) ((System.nanoTime() - start) / 1e9);
-            float[] metrics = analyze();
-            if (metrics != null) {
-                view.setMetrics(metrics[0], metrics[1], metrics[3], sec);
-            } else {
-                view.setMetrics(0, 0, 0, sec);
-            }
-            if (sec - lastLog >= 15) {
-                lastLog = sec;
-                if (metrics != null) {
-                    log(String.format("t+%ds HR=%.1f RMSSD=%.1fms SDNN=%.1fms score=%.0f%% clean=%d/%d",
-                            sec, metrics[0], metrics[1], metrics[2], metrics[3],
-                            (int) metrics[4], (int) metrics[5]));
-                } else {
-                    log("t+" + sec + "s collecting (n=" + samples.size() + ")");
+        synchronized (sessionLock) {
+            if (!running) return false;
+            sensorManager = manager;
+            sensorThread = thread;
+            listener = candidate;
+            thread.start();
+            boolean registered = manager.registerListener(
+                candidate, ppg, 2000, new Handler(thread.getLooper()));
+            log("ppg register=" + registered);
+            if (!registered) throw new IllegalStateException("PPG registration failed");
+            return true;
+        }
+    }
+
+    private void cleanupResources() {
+        synchronized (sessionLock) {
+            if (listener != null && sensorManager != null) {
+                try {
+                    sensorManager.unregisterListener(listener);
+                } catch (Throwable error) {
+                    log("PPG unregister failed: " + error);
                 }
             }
+            listener = null;
+            sensorManager = null;
+
+            if (sensorThread != null) {
+                try {
+                    sensorThread.quitSafely();
+                } catch (Throwable error) {
+                    log("PPG thread shutdown failed: " + error);
+                }
+                sensorThread = null;
+            }
+
+            if (hrEnableAttempted) {
+                try {
+                    KlvpStream.sendRequestToSensorHub('a', (short) 0, (byte) 0, (byte) 1,
+                        (byte) 0, (short) 4, new byte[]{(byte) 0xD0, 0x02, 0x00});
+                } catch (Throwable error) {
+                    log("LED shutdown failed: " + error);
+                }
+                hrEnableAttempted = false;
+            }
+
+            if (wakeLock != null) {
+                try {
+                    if (wakeLock.isHeld()) wakeLock.release();
+                } catch (Throwable error) {
+                    log("wake lock release failed: " + error);
+                }
+                wakeLock = null;
+            }
         }
     }
 
-    private float[] analyze() {
+    private HrvAnalyzer.Result analyze() {
         if (samples.size() < 305) return null;
         HrvSamples.Snapshot snapshot = samples.tail(WIN);
-        HrvAnalyzer.Result result = HrvAnalyzer.analyze(snapshot.values, snapshot.times);
-        if (result == null) return null;
-        return new float[]{result.hr, result.rmssdMs, result.sdnnMs, result.score,
-            result.cleanCount, result.totalCount};
+        return HrvAnalyzer.analyze(snapshot.values, snapshot.times);
     }
 
-
-
-    private void sleep(long ms) {
-        try { Thread.sleep(ms); } catch (InterruptedException ignored) {}
-    }
-
-    private void log(String s) {
-        sb.append(s).append('\n');
-        Log.i(TAG, s);
-    }
-
-    private void writeOut() {
+    private boolean sleepWhileRunning(long milliseconds) {
+        if (!running) return false;
         try {
-            File dir = getExternalFilesDir(null);
-            if (dir == null) dir = getFilesDir();
-            dir.mkdirs();
-            File out = new File(dir, "hrv_probe.log");
-            BufferedWriter w = new BufferedWriter(new FileWriter(out));
-            w.write(sb.toString());
-            w.flush();
-            w.close();
-            Log.i(TAG, "WROTE " + out.getAbsolutePath() + " (" + out.length() + " bytes)");
-        } catch (Throwable t) {
-            Log.e(TAG, "write failed", t);
+            Thread.sleep(milliseconds);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+            return false;
         }
+        return running;
+    }
+
+    private void log(String message) {
+        Log.i(TAG, message);
     }
 }

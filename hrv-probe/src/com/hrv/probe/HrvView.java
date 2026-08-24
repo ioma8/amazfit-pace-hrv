@@ -29,6 +29,7 @@ public class HrvView extends View {
     private volatile float hr = 0;
     private volatile float rmssd = 0;
     private volatile float score = 0;
+    private volatile boolean scoreAvailable = false;
     private volatile boolean haveData = false;
     private volatile int seconds = 0;
     private final long startTime = System.nanoTime();
@@ -93,10 +94,12 @@ public class HrvView extends View {
         }
     }
 
-    public void setMetrics(float hr, float rmssd, float score, int seconds) {
+    public void setMetrics(float hr, float rmssd, float score,
+                           boolean scoreAvailable, int seconds) {
         this.hr = hr;
         this.rmssd = rmssd;
         this.score = score;
+        this.scoreAvailable = scoreAvailable;
         this.seconds = seconds;
         this.haveData = true;
         postInvalidate();
@@ -118,7 +121,7 @@ public class HrvView extends View {
 
         ringRect.set(cx - r, cy - r, cx + r, cy + r);
         canvas.drawArc(ringRect, 90, 360, false, ringBg);
-        if (haveData && score > 0) {
+        if (haveData && scoreAvailable && score > 0) {
             float sweep = Math.max(4, score / 100f * 360);
             int col = score > 60 ? Color.rgb(0, 220, 120)
                 : (score > 30 ? Color.rgb(230, 180, 40) : Color.rgb(230, 70, 60));
@@ -160,12 +163,14 @@ public class HrvView extends View {
             canvas.drawText(seconds + "s", cx, cy - 3 * unit, labelPaint);
         }
 
-        if (haveData && score > 0) {
+        if (haveData && hr > 0) {
             textMed.setTextSize(24 * unit);
-            int col = score > 60 ? Color.rgb(0, 220, 120)
-                : (score > 30 ? Color.rgb(230, 180, 40) : Color.rgb(230, 70, 60));
+            int col = !scoreAvailable ? Color.rgb(110, 120, 130)
+                : (score > 60 ? Color.rgb(0, 220, 120)
+                : (score > 30 ? Color.rgb(230, 180, 40) : Color.rgb(230, 70, 60)));
             textMed.setColor(col);
-            canvas.drawText(String.format("%.0f%%", score), cx, cy + 24 * unit, textMed);
+            canvas.drawText(scoreAvailable ? String.format("%.0f%%", score) : "building",
+                cx, cy + 24 * unit, textMed);
             textSmall.setTextSize(12 * unit);
             textSmall.setColor(Color.rgb(150, 160, 170));
             canvas.drawText("HRV  RMSSD " + String.format("%.0f", rmssd) + "ms",
