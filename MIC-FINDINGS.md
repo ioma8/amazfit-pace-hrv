@@ -93,6 +93,11 @@ Source split:
 - `MicView.java` — round-screen rendering + touch (unit-scaled like HrvView)
 - `SpeechProc.java` — pure-Java DSP, no Android deps, offline self-test `main()`
 
+Lifecycle: **back button or any pause (home, screen off) hard-kills the process**
+(`finish()` + `Process.killProcess`) — the probe never lingers as a paused
+zombie. While running, the screen is held awake (`FLAG_KEEP_SCREEN_ON` +
+`SCREEN_DIM_WAKE_LOCK`); a partial wakelock covers the capture itself.
+
 Build/install: `mic-probe/build.sh`, `adb install -r mic-probe/aligned.apk`.
 
 ## Speech DSP chain (validated on the 16 kHz speech capture)

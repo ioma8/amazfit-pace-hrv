@@ -63,6 +63,9 @@ adb shell am start -n com.hrv.mic/.MainActivity   # tap REC, speak, tap STOP
 ./pull-recordings.sh                                # downloads + clears device
 ```
 
+Back/home exits the app completely (hard kill), and the screen stays awake while
+it runs.
+
 Each pull creates `captures/mic-probe/mic_16000_<rec-time>.wav`
 (processed) and `..._raw.wav` (unprocessed), keeping the on-device names.
 The DSP is pure Java (`SpeechProc.java`), verified bit-identical to the Python
