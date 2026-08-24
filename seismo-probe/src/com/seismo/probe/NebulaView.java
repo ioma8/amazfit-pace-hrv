@@ -208,12 +208,12 @@ public class NebulaView extends View {
         smY += (flowY - smY) * 0.15f;
         smS += (swirl - smS) * 0.15f;
         // tilt drives the flow 10x more gently than before, low-pass filtered
-        float driftX = clamp(smX * t * 0.012f, -3f, 3f) + 1.6f * (float) Math.sin(t * 0.05f);
-        float driftY = clamp(smY * t * 0.012f, -3f, 3f) + 1.6f * (float) Math.cos(t * 0.043f);
-        float woff = 0.35f * (float) Math.sin(t * 0.12f);
-        float tc = 0.6f * (float) Math.sin(t * 0.09f);
-        float ts = 0.8f * (float) Math.sin(t * 0.06f);
-        float boost = 1f + 0.08f * (float) Math.sin(t * 0.25f);
+        float driftX = clamp(smX * t * 0.012f, -3f, 3f) + 2.0f * (float) Math.sin(t * 0.28f);
+        float driftY = clamp(smY * t * 0.012f, -3f, 3f) + 2.0f * (float) Math.cos(t * 0.24f);
+        float woff = 0.5f * (float) Math.sin(t * 0.55f);
+        float tc = 0.8f * (float) Math.sin(t * 0.42f);
+        float ts = 1.0f * (float) Math.sin(t * 0.34f);
+        float boost = 1f + 0.10f * (float) Math.sin(t * 0.9f);
         float ang = smS * t * 0.05f;
         int ca16 = (int) ((float) Math.cos(ang) * 65536f);
         int sa16 = (int) ((float) Math.sin(ang) * 65536f);

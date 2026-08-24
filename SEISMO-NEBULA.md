@@ -76,10 +76,10 @@ still carries the motion when the watch is still.
 Even with the watch flat (flow ≈ 0) the nebula keeps moving — all drift terms
 are bounded so coordinates never blow up over long runs:
 
-- slow sway: `+1.6·sin(t·0.05)` / `+1.6·cos(t·0.043)` added to the field drift
-- warp breathing: `0.35·sin(t·0.12)` offsets the warp anchors
-- swirl-layer translation `0.8·sin(t·0.06)` and warp drift `0.6·sin(t·0.09)`
-- palette pulse: brightness `1 + 0.08·sin(t·0.25)`
+- sway (field drift): `+2.0·sin(t·0.28)` / `+2.0·cos(t·0.24)` — ~22 s cycle
+- warp breathing: `0.5·sin(t·0.55)` — ~11 s
+- swirl-layer translation `1.0·sin(t·0.34)` and warp drift `0.8·sin(t·0.42)`
+- palette pulse: brightness `1 + 0.10·sin(t·0.9)` — ~7 s
 
 ## Sensor mapping
 
