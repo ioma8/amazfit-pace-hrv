@@ -123,35 +123,38 @@ public class HrvView extends View {
             canvas.drawArc(ringRect, -90, sweep, false, ringFg);
         }
 
-        // breath pacer: 6 breaths/min (10s cycle), resonant frequency
+        // Horizontal breath pacer: green inhale, blue exhale.
         double tSec = (System.nanoTime() - startTime) / 1e9;
         double cycle = tSec % 10.0;
         boolean inhale = cycle < 5.0;
-        double k = inhale ? cycle / 5.0 : (10.0 - cycle) / 5.0;
-        double grow = Math.sin(Math.PI / 2 * k); // 0..1..0 smooth
-        float pacerR = (50 + 26 * (float) grow) * dp;
-        float pacerCx = cx;
-        float pacerCy = cy - 14 * dp;
-
-        // breath label
+        double progress = inhale ? cycle / 5.0 : (cycle - 5.0) / 5.0;
+        float barLeft = cx - 108 * dp;
+        float barRight = cx + 108 * dp;
+        float barTop = cy - 78 * dp;
+        float barBottom = barTop + 18 * dp;
+        ringRect.set(barLeft, barTop, barRight, barBottom);
+        pacerFill.setColor(inhale ? Color.argb(55, 0, 220, 120) : Color.argb(55, 70, 150, 255));
+        pacerStroke.setColor(inhale ? Color.rgb(0, 220, 120) : Color.rgb(70, 150, 255));
+        canvas.drawRoundRect(ringRect, 9 * dp, 9 * dp, pacerFill);
+        ringRect.right = barLeft + (float) progress * (barRight - barLeft);
+        pacerStroke.setStyle(Paint.Style.FILL);
+        canvas.drawRoundRect(ringRect, 9 * dp, 9 * dp, pacerStroke);
         labelPaint.setTextSize(14 * dp);
-        int remain = (int) Math.ceil(inhale ? 5 - cycle : 10 - cycle);
-        canvas.drawText((inhale ? "Breathe in  " : "Breathe out  ") + remain, cx, pacerCy - pacerR - 10 * dp, labelPaint);
+        canvas.drawText((inhale ? "Breathe in  " : "Breathe out  ")
+            + (int) Math.ceil(inhale ? 5 - cycle : 10 - cycle),
+            cx, barTop - 10 * dp, labelPaint);
 
-        canvas.drawCircle(pacerCx, pacerCy, pacerR, pacerFill);
-        canvas.drawCircle(pacerCx, pacerCy, pacerR, pacerStroke);
-
-        // HR inside the pacer circle
+        // HR inside the bar area.
         if (haveData && hr > 0) {
             textBig.setTextSize(58 * dp);
-            canvas.drawText(String.format("%.0f", hr), cx, pacerCy - 2 * dp, textBig);
+            canvas.drawText(String.format("%.0f", hr), cx, cy - 4 * dp, textBig);
             labelPaint.setTextSize(11 * dp);
-            canvas.drawText("BPM", cx, pacerCy + 22 * dp, labelPaint);
+            canvas.drawText("BPM", cx, cy + 18 * dp, labelPaint);
         } else {
             textBig.setTextSize(26 * dp);
-            canvas.drawText("warming up", cx, pacerCy + 2 * dp, textBig);
+            canvas.drawText("warming up", cx, cy - 2 * dp, textBig);
             labelPaint.setTextSize(11 * dp);
-            canvas.drawText(seconds + "s", cx, pacerCy + 24 * dp, labelPaint);
+            canvas.drawText(seconds + "s", cx, cy + 20 * dp, labelPaint);
         }
 
         // HRV score + RMSSD below the pacer
@@ -175,18 +178,18 @@ public class HrvView extends View {
 
         synchronized (this) {
             if (wave.size() > 2) {
-                float maxAbs = 1;
-                for (float v : wave) {
-                    float a = Math.abs(v);
-                    if (a > maxAbs) maxAbs = a;
-                }
-                float scale = (waveBottom - waveTop) * 0.42f / maxAbs;
+                float rms = 1;
+                for (float v : wave) rms += v * v;
+                rms = (float) Math.sqrt(rms / wave.size());
+                float limit = Math.max(1, rms * 2.5f);
+                float scale = (waveBottom - waveTop) * 0.42f / limit;
                 int n = wave.size();
                 float midY = (waveTop + waveBottom) / 2;
                 Path p = new Path();
                 for (int i = 0; i < n; i++) {
                     float x = waveX0 + (waveX1 - waveX0) * i / (n - 1);
-                    float y = midY - wave.get(i) * scale;
+                    float value = Math.max(-limit, Math.min(limit, wave.get(i)));
+                    float y = midY - value * scale;
                     if (i == 0) p.moveTo(x, y);
                     else p.lineTo(x, y);
                 }

@@ -21,8 +21,6 @@ import com.huami.watch.klvp.WakelockCallback;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 public class MainActivity extends Activity {
@@ -32,13 +30,12 @@ public class MainActivity extends Activity {
     private HrvView view;
     private volatile boolean running = true;
     private boolean cleaned = false;
-    private final Object lock = new Object();
-    private final List<Float> series = new ArrayList<Float>();
-    private final List<Long> times = new ArrayList<Long>();
+    private final HrvSamples samples = new HrvSamples();
     private SensorManager sm;
     private SensorEventListener listener;
     private HandlerThread ht;
     private PowerManager.WakeLock wl;
+    private final PpgWaveform waveform = new PpgWaveform();
 
     @Override
     protected void onCreate(Bundle b) {
@@ -96,7 +93,7 @@ public class MainActivity extends Activity {
         PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
         wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "hrvprobe");
         wl.acquire();
-        log("=== V16 LIVE HRV ===");
+        log("=== V18 LIVE HRV (captured-data calibrated) ===");
         log("model=" + Build.MODEL + " sdk=" + Build.VERSION.SDK_INT);
 
         Thread responder = new Thread(new Runnable() {
@@ -137,18 +134,8 @@ public class MainActivity extends Activity {
             @Override
             public void onSensorChanged(SensorEvent e) {
                 float v = e.values[0];
-                long t = System.nanoTime();
-                synchronized (lock) {
-                    series.add(v);
-                    times.add(t);
-                    int n = series.size();
-                    if (n >= 32) {
-                        double m = 0;
-                        for (int i = n - 32; i < n; i++) m += series.get(i);
-                        m /= 32;
-                        view.pushWave(v - (float) m);
-                    }
-                }
+                samples.add(v, System.nanoTime());
+                view.pushWave(waveform.filter(v));
             }
 
             @Override
@@ -162,6 +149,7 @@ public class MainActivity extends Activity {
         int lastLog = 0;
         while (running) {
             sleep(2000);
+            if (!running) break;
             int sec = (int) ((System.nanoTime() - start) / 1e9);
             float[] metrics = analyze();
             if (metrics != null) {
@@ -176,131 +164,22 @@ public class MainActivity extends Activity {
                             sec, metrics[0], metrics[1], metrics[2], metrics[3],
                             (int) metrics[4], (int) metrics[5]));
                 } else {
-                    log("t+" + sec + "s collecting (n=" + series.size() + ")");
+                    log("t+" + sec + "s collecting (n=" + samples.size() + ")");
                 }
             }
         }
-        writeOut();
     }
 
-    // Returns uniform-clock {hr, rmssdMs, sdnnMs, score, cleanCount, totalCount}.
-    // SensorEvent callback time is deliberately not used: the hub delivers five-sample bursts.
     private float[] analyze() {
-        int n;
-        float[] vals;
-        long[] wall;
-        synchronized (lock) {
-            n = series.size();
-            if (n < 1000) return null; // >=39s: HRV needs a stationary window
-            int from = Math.max(0, n - WIN);
-            int len = n - from;
-            vals = new float[len];
-            wall = new long[len];
-            for (int i = 0; i < len; i++) {
-                vals[i] = series.get(from + i);
-                wall[i] = times.get(from + i);
-            }
-        }
-        int nn = vals.length;
-        double dt = (wall[nn - 1] - wall[0]) / 1e9 / (nn - 1);
-        double fs = 1.0 / dt;
-        if (fs < 24 || fs > 27) return null;
-
-        int w = (int) Math.round(1.2 * fs);
-        double[] trend = new double[nn];
-        double acc = 0;
-        for (int i = 0; i < nn; i++) {
-            acc += vals[i];
-            if (i >= w) acc -= vals[i - w];
-            trend[i] = acc / Math.min(i + 1, w);
-        }
-        double[] sm = new double[nn];
-        for (int i = 0; i < nn; i++) sm[i] = vals[i] - trend[i];
-        double[] s3 = new double[nn];
-        for (int i = 1; i < nn - 1; i++) s3[i] = (sm[i - 1] + 2 * sm[i] + sm[i + 1]) / 4.0;
-        s3[0] = sm[0];
-        s3[nn - 1] = sm[nn - 1];
-
-        double std = 0;
-        for (double v : s3) std += v * v;
-        std = Math.sqrt(std / nn);
-        if (std < 100) return null;
-        double thr = 0.5 * std;
-
-        // One common peak set. pos is fractional sample index after parabolic interpolation.
-        List<Double> peakPos = new ArrayList<Double>();
-        for (int i = 1; i < nn - 1; i++) {
-            if (s3[i] >= s3[i - 1] && s3[i] > s3[i + 1] && s3[i] > thr) {
-                double y0 = s3[i - 1], y1 = s3[i], y2 = s3[i + 1];
-                double denom = y0 - 2 * y1 + y2;
-                double delta = denom != 0 ? 0.5 * (y0 - y2) / denom : 0;
-                if (delta < -0.5) delta = -0.5;
-                if (delta > 0.5) delta = 0.5;
-                double pos = i + delta;
-                if (peakPos.isEmpty() || (pos - peakPos.get(peakPos.size() - 1)) * dt >= 0.3) {
-                    peakPos.add(pos);
-                }
-            }
-        }
-        if (peakPos.size() < 8) return null;
-        List<Double> uniformIbi = new ArrayList<Double>();
-        for (int i = 1; i < peakPos.size(); i++) {
-            uniformIbi.add((peakPos.get(i) - peakPos.get(i - 1)) * dt);
-        }
-        double[] metrics = metricsFromIbi(uniformIbi);
-        if (metrics == null) return null;
-        return new float[]{(float) metrics[0], (float) (metrics[1] * 1000), (float) (metrics[2] * 1000),
-            (float) metrics[3], (float) metrics[4], (float) metrics[5]};
+        if (samples.size() < 305) return null;
+        HrvSamples.Snapshot snapshot = samples.tail(WIN);
+        HrvAnalyzer.Result result = HrvAnalyzer.analyze(snapshot.values, snapshot.times);
+        if (result == null) return null;
+        return new float[]{result.hr, result.rmssdMs, result.sdnnMs, result.score,
+            result.cleanCount, result.totalCount};
     }
 
-    // Same dicrotic merging + rejection for both timing hypotheses.
-    private double[] metricsFromIbi(List<Double> input) {
-        List<Double> ibi = new ArrayList<Double>();
-        for (double d : input) if (d > 0.3 && d < 2.5) ibi.add(d);
-        if (ibi.size() < 6) return null;
-        List<Double> sorted = new ArrayList<Double>(ibi);
-        Collections.sort(sorted);
-        double med = sorted.get(sorted.size() / 2);
 
-        List<Double> merged = new ArrayList<Double>();
-        int i = 0;
-        while (i < ibi.size()) {
-            double d = ibi.get(i);
-            if (d < 0.62 * med && i + 1 < ibi.size()) {
-                double d2 = ibi.get(i + 1);
-                double sum = d + d2;
-                if (Math.abs(sum - 2 * med) < 0.35 * 2 * med) {
-                    merged.add(sum);
-                    i += 2;
-                    continue;
-                }
-            }
-            merged.add(d);
-            i++;
-        }
-        if (merged.size() < 5) return null;
-        List<Double> mergedSorted = new ArrayList<Double>(merged);
-        Collections.sort(mergedSorted);
-        double med2 = mergedSorted.get(mergedSorted.size() / 2);
-        List<Double> clean = new ArrayList<Double>();
-        for (double d : merged) if (d > 0.55 * med2 && d < 1.6 * med2) clean.add(d);
-        if (clean.size() < 10) return null;
-
-        double meanIbi = 0;
-        for (double d : clean) meanIbi += d;
-        meanIbi /= clean.size();
-        double sdnn = 0;
-        for (double d : clean) sdnn += (d - meanIbi) * (d - meanIbi);
-        sdnn = Math.sqrt(sdnn / clean.size());
-        double rmssd = 0;
-        for (int j = 1; j < clean.size(); j++) {
-            double d = clean.get(j) - clean.get(j - 1);
-            rmssd += d * d;
-        }
-        rmssd = Math.sqrt(rmssd / (clean.size() - 1));
-        double score = 100 * (1 - Math.exp(-rmssd / 0.035));
-        return new double[]{60.0 / meanIbi, rmssd, sdnn, score, clean.size(), merged.size()};
-    }
 
     private void sleep(long ms) {
         try { Thread.sleep(ms); } catch (InterruptedException ignored) {}

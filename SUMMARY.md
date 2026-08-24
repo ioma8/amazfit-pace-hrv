@@ -1,6 +1,6 @@
 # Amazfit Pace A1612 — Findings Summary
 
-Concise digest of the recon + reverse-engineering sessions. Detailed log: `PACE-FINDINGS.md`.
+Concise digest of the recon + reverse-engineering sessions. Detailed logs: [`PACE-FINDINGS.md`](PACE-FINDINGS.md) and [`HRV-FINDINGS.md`](HRV-FINDINGS.md).
 
 ## Device
 - Amazfit Pace **A1612** (`huangheUS`), Android **5.1** (API 22), kernel **3.10.14** (MIPS32r1, 2019-11-26).
@@ -27,29 +27,34 @@ Concise digest of the recon + reverse-engineering sessions. Detailed log: `PACE-
 - Radios: **WiFi, BT + BLE, GPS, mic**. No camera, no NFC.
 - 18 HW sensors: accel **500 Hz**, gyro, mag, **barometer**, light, step, **HR (BPM)**, **raw PPG ×4 (type 65538, 5–500 Hz)**, infrared, gesture, + AOSP fusions.
 
-## HRV feasibility (pulse app)
-- **SensorHub MCU** (`libsensorhub.so`) samples PPG and computes BPM; Android gets **BPM only** (sensor type 21).
-- Stock app `MeasureHeartRateActivity` uses `getDefaultSensor(21)`; grep-verified it **never reads raw PPG**.
-- Raw PPG (type **65538**) is exposed with **no permission gate** and is registerable from a third-party app.
-- **Empirical (test APK, on-wrist): raw PPG NOT HRV-usable.** `values[]` = 16 packed values/event; `event.timestamp`
-  non-monotonic/identical (FIFO bursts); values are DC baseline (no pulse) because the SensorHub measurement
-  engine isn't running. Even accel is capped ~25 Hz.
-- **Live BPM: PROVEN rootless.** `hm_sensor_hub_service` binder is open (no permissions, SELinux off). The stock
-  `enableAllDayHeartMonitor` KLVP command (`sendKlvpRequest` target=4 cmd=1, SportConfig field 42 -> bytes
-  `[D0 02 01]`) + `requestWearDetection(true)` starts continuous HR: type-21 streamed BPM 84-92 on wrist.
-- **HRV verdict: LIVE HR + TREND HRV WORKS on the 25.8 Hz raw PPG.** Direct KLVP facade (klvp.watch.so) triggers
-  the measurement; bandpass + parabolic peak detection on wall-clock + dicrotic merge + 55 s sliding window
-  recover the pulse (resting HR 86-91 BPM, declining post-run curve). RMSSD inflated ~10-30% vs ECG (25 Hz
-  ceiling) - trend HRV, not clinical. App: hrv-probe/ (v14, round-screen UI + breath pacer + auto LED-off).
+## HRV feasibility and calibrated app
+- Raw PPG type **65538** is exposed without a permission gate. The proven rootless KLVP command `[D0 02 01]`
+  starts continuous optical measurement; `[D0 02 00]` stops it and turns the LED off.
+- The hub delivers one changing PPG value per event at approximately **25.2–25.8 Hz**. The 16-value event array
+  is not 16 time samples. Callbacks arrive as approximately five-sample bursts every 200 ms.
+- Callback arrival timestamps are unusable for beat timing. Reconstructing a uniform clock from sample index and
+  the measured mean period reduced same-peak RMSSD from **147–168 ms** to **37–41 ms** without changing HR.
+- A captured 59.7-second, 1,507-sample fixture proved that a global absolute-height threshold discarded real
+  pulses during baseline drift. Adaptive local-prominence detection finds **82 peaks / 81 valid intervals**.
+- Calibrated fixture result: **83.21 bpm**, **RMSSD 40.02 ms**, **SDNN 70.37 ms**, coherence **40.31%**.
+- A subsequent watch run was stable at **85–87 bpm**, **RMSSD 31–36 ms**, **SDNN 56–62 ms**, with up to
+  **75/76** clean intervals. No Android runtime crash occurred.
+- RMSSD never bridges rejected intervals. Dicrotic repair merges two short intervals only when they sum to one
+  normal IBI. Frequency scoring preserves real elapsed time across rejected intervals.
+- The score now matches `emwave-utils/src/metrics.rs`: normalized LF power multiplied by log-scaled LF peak
+  concentration, explicitly bounded to **0–100**. The old saturating RMSSD-to-percent curve was removed.
+- Current app: `hrv-probe/`; evidence and limitations: [`HRV-FINDINGS.md`](HRV-FINDINGS.md); regression fixture:
+  `captures/raw_ppg.csv`.
 
 ## RE structure
 - System APKs are **odexed**: no `classes.dex`; real code in `mips/*.odex` (carve dex → `jadx`).
 - `libdataProcess.so` = sleep/HR analysis on BPM series; `libsensorhub.so` = SensorHub JNI bridge.
 - Tooling: `apktool`, `jadx`, `kuna` (MIPS decompiler), `radare2` all work on this target.
 
-## HRV precision fix
-- Root cause of 98–100% scores: callback wall time represented five-sample transport bursts (~0/200 ms gaps),
-  not the uniform ~25.4 Hz sample clock. Same-peak A/B: wall RMSSD 147–168 ms vs uniform RMSSD 37–41 ms;
-  HR unchanged ~84 BPM.
-- Final V16 uses fractional sample index x calibrated mean period, sorted medians, dicrotic merge, a 55 s window,
-  and a soft RMSSD score curve. Expected resting score from the validated run: 65–69%.
+
+## Root audit status
+- Towelroot/futex prerequisite: **patched** (`FUTEX_CMP_REQUEUE_PI` same-address returns `EINVAL`).
+- Dirty COW race: **failed** on this 3.10.14 build; no file modification.
+- Unsigned OTA rejected; fastboot unavailable; HmFTP only exposes anonymous `/sdcard/`.
+- iovyroot/CVE-2015-1805 remains the only plausible kernel route, but its public offsets are ARM/ARM64-only;
+  this MIPS build needs exact kernel symbols and a custom port. No root method is currently proven.
