@@ -23,6 +23,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
         sensors = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         view = new NebulaView(this);
         setContentView(view);

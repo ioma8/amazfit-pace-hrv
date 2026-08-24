@@ -26,17 +26,50 @@ The classic Shadertoy "nebula" recipe, rendered on the CPU:
 5. **Palette** — blue/violet nebula mix of the `c`, `s`, `w` channels plus a
    `c*s` glow term, vignette darkening at the edges.
 
-## Rendering strategy
+## Rendering strategy — Carmack-style fast math
 
-- Computed at **64×60 px** (ARGB_8888), drawn to 320×300 with
-  `Paint.FILTER_BITMAP_FLAG` — the bilinear upscale turns the coarse field into
-  the smooth fluid look.
-- MIPS-optimized inner loop: value noise uses an **integer floor**
-  (`(int)(x+4096f)-4096`, no `Math.floor` JNI calls), coordinates kept in
-  bounds so the trick always holds; single-warp `q` (1 fbm instead of 2);
-  vignette computed on squared distance (no `sqrt`); ~10 `noise()` calls/pixel.
-- Render-bound loop (`postDelayed(16)`), `invalidate()` per frame;
-  a `fps=` log line every 30 frames is left in as a debug aid.
+Measured evolution on this MIPS core (soft/nominal FPU): float fBm 1.8 fps →
+float-optimized 4 fps → all-integer 64×60 ~10-12 fps → 48×45 ~15-20 →
+**24×22 grid pipeline 44-50 fps**.
+
+- The fBm field is baked **once** into a **byte map** (256×256, 64 KB —
+  L2-resident, 4× less memory traffic than ints; 8 texels/unit, 32-unit period,
+  wrapped sampling).
+- The four warp layers (`w/q/c/s`) are sampled on a **half-resolution grid**
+  (12×11) and bilinearly upscaled in the final color pass — big-field reads
+  drop ~4×; all intermediate grids are tiny and cache-hot.
+- Final color pass at 24×22, upscaled to the screen by the GPU (measured
+  0 ms — hardware-accelerated `drawBitmap`).
+- All-integer math: no `Math.floor` (offset-cast), no `sqrt` (precomputed
+  vignette table), ternaries instead of `Math.min`, `*410>>8` fixed-point warp
+  scaling, integer `sin/cos` via 16.16 tables per frame, render-bound loop
+  (`handler.post(this)`, no fixed delay).
+- `fps=` log once per second as a debug aid.
+
+## Scheduling (console-grade)
+
+The Huami launcher burns 38-43 % CPU on this single core (per-second widget
+redraws) and SurfaceFlinger another ~20 %. Two moves made the animation
+immune:
+
+- Rendering runs on a **dedicated thread at `THREAD_PRIORITY_URGENT_AUDIO`**
+  (`render()` → `postInvalidate()`); the UI thread only blits the small bitmap
+  to the hardware canvas (~0 ms). The render thread preempts the launcher's
+  normal-priority threads during its 1-3 ms pass.
+- The loop is **GC-free**: the per-frame `Rect` allocation in `onDraw` was
+  causing a GC stall every ~1 s (the visible "freeze in blocks"); the Rect is
+  now preallocated and logging is throttled to once per second.
+
+Measured result: **sustained 60 fps** (the panel's vsync ceiling) even with the
+launcher hammering the core.
+
+## Tilt response
+
+Sensor input is low-pass filtered (`sm += (raw - sm) * 0.15`) and the tilt gain
+was reduced 10× (`flow * t * 0.012`, drift clamped to ±3) with the swirl
+likewise calmer (`swirl * t * 0.05`) — the nebula now drifts smoothly instead
+of lurching; the bounded self-evolution (sway, warp breathing, palette pulse)
+still carries the motion when the watch is still.
 
 ## Self-evolution
 
