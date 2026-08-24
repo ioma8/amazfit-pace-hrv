@@ -30,11 +30,26 @@ Concise digest of the recon + reverse-engineering sessions. Detailed log: `PACE-
 ## HRV feasibility (pulse app)
 - **SensorHub MCU** (`libsensorhub.so`) samples PPG and computes BPM; Android gets **BPM only** (sensor type 21).
 - Stock app `MeasureHeartRateActivity` uses `getDefaultSensor(21)`; grep-verified it **never reads raw PPG**.
-- Raw PPG (type **65538**, up to **500 Hz**, no `BODY_SENSORS` gate) is exposed in the standard sensor list → a custom app can `getDefaultSensor(65538)` + `registerListener`.
-- 500 Hz = 2 ms spacing ⇒ enough for **RMSSD/SDNN/pNN50** and **LF/HF**. Limiter is wrist motion artifacts, not hardware.
-- Unproven: real delivered rate + `values[]` layout (needs a test APK).
+- Raw PPG (type **65538**) is exposed with **no permission gate** and is registerable from a third-party app.
+- **Empirical (test APK, on-wrist): raw PPG NOT HRV-usable.** `values[]` = 16 packed values/event; `event.timestamp`
+  non-monotonic/identical (FIFO bursts); values are DC baseline (no pulse) because the SensorHub measurement
+  engine isn't running. Even accel is capped ~25 Hz.
+- **Live BPM: PROVEN rootless.** `hm_sensor_hub_service` binder is open (no permissions, SELinux off). The stock
+  `enableAllDayHeartMonitor` KLVP command (`sendKlvpRequest` target=4 cmd=1, SportConfig field 42 -> bytes
+  `[D0 02 01]`) + `requestWearDetection(true)` starts continuous HR: type-21 streamed BPM 84-92 on wrist.
+- **HRV verdict: LIVE HR + TREND HRV WORKS on the 25.8 Hz raw PPG.** Direct KLVP facade (klvp.watch.so) triggers
+  the measurement; bandpass + parabolic peak detection on wall-clock + dicrotic merge + 55 s sliding window
+  recover the pulse (resting HR 86-91 BPM, declining post-run curve). RMSSD inflated ~10-30% vs ECG (25 Hz
+  ceiling) - trend HRV, not clinical. App: hrv-probe/ (v14, round-screen UI + breath pacer + auto LED-off).
 
 ## RE structure
 - System APKs are **odexed**: no `classes.dex`; real code in `mips/*.odex` (carve dex → `jadx`).
 - `libdataProcess.so` = sleep/HR analysis on BPM series; `libsensorhub.so` = SensorHub JNI bridge.
 - Tooling: `apktool`, `jadx`, `kuna` (MIPS decompiler), `radare2` all work on this target.
+
+## HRV precision fix
+- Root cause of 98–100% scores: callback wall time represented five-sample transport bursts (~0/200 ms gaps),
+  not the uniform ~25.4 Hz sample clock. Same-peak A/B: wall RMSSD 147–168 ms vs uniform RMSSD 37–41 ms;
+  HR unchanged ~84 BPM.
+- Final V16 uses fractional sample index x calibrated mean period, sorted medians, dicrotic merge, a 55 s window,
+  and a soft RMSSD score curve. Expected resting score from the validated run: 65–69%.

@@ -266,3 +266,140 @@ A third-party app can `SensorManager.getDefaultSensor(65538)` + `registerListene
   `values[]` layout (ADC count? green vs IR channel?); real rate under load; motion-artifact quality.
 - **Limiter is signal quality, not hardware:** wrist PPG + motion ⇒ artifact rejection via the 500 Hz
   accelerometer is mandatory for anything beyond resting HRV.
+
+## 15. Empirical sensor probe (on-wrist, test APK `com.hrv.probe`)
+
+Built a pure-Java MIPS APK (no NDK needed) that registers raw sensors and records `event.timestamp` + `values[]`,
+then ran it on-wrist. Log recovered via logcat (file lands app-private under
+`/storage/emulated/0/Android/data/com.hrv.probe/files/`, not shell-readable).
+
+### Results
+| Sensor (request) | register | events | vals/event | delivered rate | timestamps | ch0 values |
+|---|---|---|---|---|---|---|
+| PPG auto @0µs | true | 199 | 16 | 9900 Hz* | burst, non-monotonic | 2237–65535 (mean 10868) |
+| PPG auto @2000µs | true | 187 | 16 | 9300 Hz* | burst | 21912–46760 |
+| PPG 25mA @0µs | true | 200 | 16 | — | identical (0 ms gap) | 66–6416 |
+| PPG 25mA @4000/20000µs | true | ~199 | 16 | — | identical | 224–240 (DC, const) |
+| PPG 40mA (all rates) | true | ~200 | 16 | — | identical | ~357 (DC, const) |
+| PPG 55mA (all rates) | true | ~200 | 16 | — | identical | ~468 (DC, const) |
+| IR 65539 @0µs | true | **0** | — | — | — | none |
+| HR BPM 21 @0µs | true | **0** | — | — | — | none (no active measure) |
+| ACCEL 1 @2000µs | true | 200 | 3 | **25.4 Hz** | monotonic, 39 ms mean | 0.19–0.46 |
+
+\* rate figures are the FIFO burst: all ~200 events arrive within ~20 ms (one flush), then silence for the
+remaining session.
+
+### Conclusions (resolves §14 "unproven" items)
+1. **Raw PPG is reachable** (`getDefaultSensor(65538)` = true, 4 sensors, no permission) — but **not
+   HRV-usable via the public API**:
+   - `values[]` = **16 values/event** (packed, semantics unknown), not a 1–2-channel waveform.
+   - `event.timestamp` is **not a per-sample clock**: most sessions return identical/non-monotonic timestamps
+     (`rate=Infinity`, `meanGap=0`); delivery is FIFO-burst, not a stream.
+   - Values are **DC baseline with no pulse oscillation** (40 mA ≈ 357 const, 55 mA ≈ 468 const) — the SensorHub
+     measurement engine is idle, so the PPG frontend isn't AC-coupled/amplified for a waveform.
+2. **HR BPM (type 21) returns nothing** without an active SensorHub measurement (stock app triggers it via the
+   internal service; a bare listener does not).
+3. **SensorHub downsamples everything**: accelerometer requested at 500 Hz delivered **25.4 Hz**.
+
+### Verdict
+Real-time HRV through the standard `SensorManager` API is **not feasible**. The SensorHub co-processor owns
+acquisition and only leaks BPM (during measurement) or a raw-PPG FIFO without reliable timing. HRV would require
+either (a) driving SensorHub measurement mode via Huami's `IHmSensorHubService` (uid-1000/system context), or
+(b) reverse-engineering the 16-value packet + FIFO timing in `libsensorhub.so` / the HAL.
+
+
+## 16. Sensor-hub measurement control (proven, rootless)
+
+### Binder access
+- `hm_sensor_hub_service` (`com.huami.watch.sensor.IHmSensorHubService`) is registered in the live
+  servicemanager. Reachable from **shell** (`service call hm_sensor_hub_service <code>`) and from a
+  **third-party app** (`ServiceManager.getService` via reflection) — no permission checks (SELinux disabled).
+- Verified callable: `getSensorDataInfo` (live ver/steps/HR/quality), `getGpsState`, `getHeartHistoryData`
+  (returns null), `configureSensorhub`, `configureSensorHubWakeupSource`, `requestWearDetection`,
+  `sendKlvpRequest`.
+- `configureSensorHubAlgorithm` requires a non-null `IConfigFinishDispatcher` binder (NPE with null).
+
+### Measurement trigger (proved on wrist)
+Exact stock sequence from `HmSensorHubConfigManager.enableAllDayHeartMonitor(true)`:
+1. `sendKlvpRequest`: KlvpRequest{cmd=1, msgRemain=0, target=4 (TGT_SPORT_CONFIG),
+   configValue = SportConfig protobuf with field 42 (`mIsAlldayAutoHeartRateEnabled`) = true -> bytes
+   `[D0 02 01]`} — binder code 14, returns pairId.
+2. `requestWearDetection(true, cb)` — binder code 17.
+
+Result (watch worn, v5 probe):
+- **type-21 delivered 29 events in 40 s, BPM 84–92** — live heart rate.
+- Raw PPG (65538) stream active simultaneously: ch0 41219–44603, still ~25 Hz.
+- Hub replies `responseCode=90, len=0` to the config — semantics undocumented in stock Java; measurement
+  starts regardless.
+- `getSensorDataInfo` HR field stays 0 (per-minute bucket — not the live channel); `getHeartHistoryData`
+  stays null; sysfs attrs unchanged (`enable=0x1`, `delay_ms=0`).
+
+### HRV final verdict
+- **Live BPM: YES — proven, rootless, from a third-party app.**
+- **Beat-to-beat / HRV: NO via any exposed API.** Type-21 BPM values are smoothed (constant across
+  consecutive events, e.g. 86×7, 85×3; ~1–2 Hz updates), not inter-beat intervals. Raw PPG stays capped at
+  ~25 Hz during measurement (40 ms spacing → RMSSD unusable). No IBI interface exists in the hub service.
+- **Only remaining route**: reverse-engineer the KLVP protocol + hub firmware (in `sensors.sensorHub.so` /
+  the proprietary hub blob) for an IBI or high-rate raw-PPG command. Uncertain payoff.
+
+### Artifacts
+- Probe app v5 (`hrv-probe/`): hub-service binder calls with hand-built parcels + KLVP response dispatcher.
+- Ledger: `HYPOTHESES.csv` (5 hypotheses, 4 proved/disproved paths).
+
+
+## 17. Live HRV app — final outcome
+
+The 25.8 Hz raw PPG stream (the platform ceiling, see §14-16) IS sufficient for live HR + trend HRV
+when the SensorHub measurement is active. Proven on-wrist (v11/v13):
+
+- v11: IBI clusters 558-644 ms (93-107 BPM) + 787-814 ms (76 BPM) = declining post-run pulse; median 610 ms.
+- v13: steady resting HR 86-91 BPM over 4 minutes.
+- FFT corroborates (1.76-1.90 Hz peak).
+
+### Working pipeline (all on-watch, MIPS, pure Java)
+1. Trigger measurement: direct KLVP via JNI facade on `/system/lib/hw/klvp.watch.so`
+   (`KlvpStream.sendRequestToSensorHub('a', 0, 0, cmd=1, 0, target=4, [D0 02 01])`) — no service, no root.
+   Same for transactions: `libsensorhub.so` natives reimplemented as
+   `com.huami.watch.sensor.HmSensorManager` (request/start/release transaction) - direct hub data fetch.
+2. Collect PPG (type 65538) at ~25.4 Hz with `System.nanoTime()` wall clock (event.timestamp is broken).
+3. Sliding 55 s window: 1.2 s moving-average trend removal + 3-pt smoothing.
+4. Peak detection: local maxima above 0.5xstd, 300 ms min distance, parabolic interpolation on wall clock.
+5. Dicrotic-notch merge: short+long IBI pairs summing to ~2x median are merged.
+6. Outlier cleaning [0.55..1.6]x median; HR = 60/meanIBI; SDNN; RMSSD on successive diffs.
+7. Score = 100 x (1 - exp(-RMSSD/35ms)) - realistic 0-100, no saturation.
+8. UI (round 320x300): live waveform, HR, HRV ring gauge + score, RMSSD, 6 BPM resonant breath pacer
+   (10 s cycle), FLAG_KEEP_SCREEN_ON, 15 fps animation.
+9. Clean exit: onPause/onDestroy -> idempotent stopAll() sends allDayHR=false (LED off) + unregister +
+   wakelock release.
+
+### Limits (honest)
+- 25.8 Hz sampling: RMSSD is inflated vs ECG (~10-30%) and sensitive to motion; keep still, breathe with
+  the pacer for best readings. Trend HRV, not clinical.
+- Contact gate: std < 100 counts -> "no signal" (avoids fake 100% on charger).
+- The hub still owns the high-rate data; only BPM (type-21) and 25 Hz PPG leave it.
+
+## 18. HRV precision root cause and final fix
+
+On-wrist A/B test used the **same peak set and cleaning**, changing only the time base:
+
+| Timing | RMSSD | SDNN | HR |
+|---|---:|---:|---:|
+| callback arrival time | 147–168 ms | 97–101 ms | 83.8–84.4 BPM |
+| reconstructed uniform sample clock | **36.9–40.7 ms** | **42–44 ms** | 83.8–84.4 BPM |
+
+### Root cause
++ SensorHub emits one PPG sample per event at ~25.4 Hz, but transports them as five-event bursts every ~200 ms.
++ `SensorEvent.timestamp` is zero/broken; `System.nanoTime()` in the callback measures burst delivery, producing
++  near-zero gaps within a burst and ~200 ms gaps between bursts.
++ Using callback times as peak times created artificial successive-IBI differences and inflated RMSSD roughly 4x.
+
+### Final algorithm
++ Calibrate `dt = (lastCallback-firstCallback)/(sampleCount-1)` over the 55 s window (valid only at 24–27 Hz).
++ Peak time = `(fractionalSampleIndex * dt)`; fractional index comes from 3-point parabolic interpolation.
++ Never use callback arrival time as individual sample time.
++ Sliding 55 s window; minimum 39 s before publishing HRV.
++ Sort the merged IBI list before selecting its median (the previous chronological-middle value was also wrong).
++ Dicrotic-notch merge + `[0.55..1.6] x median` rejection.
++ Score `100 x (1 - exp(-RMSSD/35ms))`: 20 ms -> 44%, 35 ms -> 63%, 60 ms -> 82%.
+
+V16 is installed. Verified final expected resting output: HR ~84 BPM, RMSSD 37–41 ms, HRV score 65–69%.
