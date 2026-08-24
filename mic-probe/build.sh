@@ -9,7 +9,7 @@ rm -rf obj dexout
 mkdir -p obj dexout
 javac --release 8 -classpath "$AJ" -d obj $(find src -name '*.java')
 "$BT/d8" --lib "$AJ" --output dexout $(find obj -name '*.class')
-"$BT/aapt" package -f -M AndroidManifest.xml -I "$AJ" -F unsigned.apk
+"$BT/aapt" package -f -M AndroidManifest.xml -S res -I "$AJ" -F unsigned.apk
 (cd dexout && zip -q -0 ../unsigned.apk classes.dex)
 "$BT/zipalign" -f 4 unsigned.apk aligned.apk
 "$BT/apksigner" sign --ks "$HOME/.android/debug.keystore" --ks-pass pass:android \
