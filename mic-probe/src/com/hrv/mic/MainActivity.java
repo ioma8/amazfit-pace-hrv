@@ -30,7 +30,8 @@ public class MainActivity extends Activity {
     private volatile boolean recording = false;
     private volatile Thread worker = null;
     private volatile String recTs = null;
-    private PowerManager.WakeLock wl;
+    private PowerManager.WakeLock wl;         // partial, during recording
+    private PowerManager.WakeLock screenLock; // keeps screen on while app runs
 
     static class ShortBuf {
         short[] d = new short[1 << 16];
@@ -46,14 +47,43 @@ public class MainActivity extends Activity {
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        wl = ((PowerManager) getSystemService(Context.POWER_SERVICE))
-                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mic");
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mic");
+        screenLock = pm.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP, "mic-screen");
         view = new MicView(this);
         view.setListener(new MicView.Listener() {
             @Override public void onRecord() { startRecording(); }
             @Override public void onStop() { recording = false; }
         });
         setContentView(view);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        screenLock.acquire();
+    }
+
+    @Override public void onBackPressed() {
+        killApp();
+    }
+
+    @Override protected void onPause() {
+        super.onPause();
+        killApp();
+    }
+
+    /** Stop everything and hard-kill the process: back button or any pause
+     *  (home, screen off) exits the probe completely, never a paused zombie. */
+    void killApp() {
+        recording = false;
+        Thread t = worker;
+        if (t != null) {
+            try { t.join(1000); } catch (InterruptedException ignored) {}
+        }
+        if (wl != null && wl.isHeld()) wl.release();
+        if (screenLock != null && screenLock.isHeld()) screenLock.release();
+        finish();
+        android.os.Process.killProcess(android.os.Process.myPid());
     }
 
     void startRecording() {
@@ -147,6 +177,7 @@ public class MainActivity extends Activity {
             try { t.join(1500); } catch (InterruptedException ignored) {}
         }
         if (wl != null && wl.isHeld()) wl.release();
+        if (screenLock != null && screenLock.isHeld()) screenLock.release();
         super.onDestroy();
     }
 }
