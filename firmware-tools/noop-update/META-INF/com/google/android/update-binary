@@ -1,0 +1,4 @@
+#!/sbin/sh
+
+echo unsigned-recovery-ok > /data/media/0/unsigned-recovery-ok
+exit 0

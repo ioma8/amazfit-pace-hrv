@@ -403,3 +403,102 @@ On-wrist A/B test used the **same peak set and cleaning**, changing only the tim
 + Score `100 x (1 - exp(-RMSSD/35ms))`: 20 ms -> 44%, 35 ms -> 63%, 60 ms -> 82%.
 
 V16 is installed. Verified final expected resting output: HR ~84 BPM, RMSSD 37–41 ms, HRV score 65–69%.
+
+
+## 19. ADPD174 100 Hz firmware patch (prepared, not flashed)
+
+Hardware evidence: official ADPD174 register definitions use:
+
+- `REG_SAMPLING_FREQ = 0x12`; value `8000 / sample_rate`.
+- `REG_DEC_MODE = 0x15`; internal-average factor bits: Slot A bits 4–6, Slot B bits 8–10.
+- Firmware normal configuration sets `REG_SAMPLING_FREQ = 0x0050` (100 Hz).
+- Firmware configuration table at file offset `0x3EFE9` contains `15 02 20`: `REG_DEC_MODE=0x0220`,
+  factor 2 = 4-sample averaging on both slots. 100 Hz / 4 = the observed 25 Hz output.
+
+### Exact patch
+
+Input: `/system/etc/firmware/sensorhub.bin` (259,180 bytes).
+
+```text
+file offset 0x003EFEA: 02 20  ->  00 00
+firmware address:       0x0803EFEA
+meaning:                REG_DEC_MODE 0x0220 -> 0x0000
+expected output:        100 Hz (subject to firmware/transport limits)
+```
+
+The patch disables sample averaging only; it does not change LED current, pulse timing, AFE gain, or the
+100 Hz optical sample configuration.
+
+Artifacts:
+
+| File | SHA-256 | Status |
+|---|---|---|
+| `firmware/sensorhub-25hz-original.bin` | `fb562b8cb854141e220ec1971d7f328b4fdf43f17c3cc259dfebccba70679f7f` | exact pull/rollback |
+| `firmware/sensorhub-100hz.bin` | `ed76f3601ad504054b436cb1cbf2f8e32ddfe69e825bb7ab5e1860402e5dd8db` | two-byte candidate |
+
+### Current status
+
+- **Not flashed.** Device firmware hash was rechecked after the unsigned OTA test and matched the original.
+- Stock recovery rejected the unsigned ZIP; Huami OTA certificate is device-specific.
+- Fastboot was unavailable even after `sys.fastboot.enable=true`.
+- Dirty COW was tested safely against a temporary read-only file and failed; do not use it against firmware.
+- User cannot disassemble the watch, so SPI/SWD/JTAG programming is excluded.
+- Remaining software delivery options: discover a signed/privileged OTA path, exploit a root/system-uid
+  path, or find a SensorHub command that changes ADPD174 `REG_DEC_MODE` live.
+- **Do not write the patch without a verified rollback/flash path.** A bad SensorHub image may disable HR,
+  SensorHub communication, or firmware update recovery.
+
+
+## 20. Firmware RE status: live DEC_MODE command not found
+
+### Confirmed firmware configuration
+- Firmware is ARM Cortex-M Thumb, flash base `0x08000000`; `sensorhub.bin` is 259,180 bytes.
+- Normal ADPD174 setup calls `fcn.080255f8`, whose 7-register standby table is in MCU SRAM at `0x2000022A`.
+- Firmware config table at file address `0x0803EFE9` contains `15 02 20`: register `0x15` (`REG_DEC_MODE`), value
+  `0x0220` (4× Slot-A/Slot-B internal averaging).
+- Normal setup contains `12 00 50`: register `0x12` (`REG_SAMPLING_FREQ`), value `0x0050` (100 Hz).
+- ADI driver formula: `REG_DEC_MODE` factors 0/1/2 = 1×/2×/4×; output therefore becomes 25 Hz.
+- Factory-test paths use a separate table containing `12 00 04` (2 kHz) and `15 00 00` (no averaging), but
+  Android factory PPG modes still exported 25 Hz; the high-rate path is not exposed by those modes.
+
+### Live-command investigation
+- Traced all firmware callers of the ADPD register-write primitive. `REG_DEC_MODE` writes occur in initialization,
+  calibration, and mode setup; no exposed KLVP command handler was found that accepts arbitrary ADPD register writes.
+- `sensorhub-channel-log` is diagnostic text, not a raw PPG stream. `sensorhub-health` and `sensorhub-algo` return
+  no direct stream data.
+- `mcu_sdram` expects `/dev/sensorhub-log`, while this kernel exposes `sensorhub-channel-log`; a read-only request
+  through the renamed node did not return an SRAM dump. No memory or firmware write was performed.
+- H11 remains **need more info**: a hidden firmware/debug command is not ruled out, but none is statically identified.
+
+### Delivery constraint
+The two-byte patch is prepared in `firmware/`, but installing it requires one of: Huami-signed OTA, root/system write
+access, a working bootloader/recovery path, or physical SPI/SWD access. None is currently available without risking the
+watch. Do not write `force_upgrade` or alter the image until a verified rollback path exists.
+
+
+## 21. Root audit status
+
+### Tested/eliminated
+- `adb root`: production build rejects it; shell remains uid 2000.
+- Dirty COW (`CVE-2016-5195`): static MIPS32 race against a harmless read-only file failed after 20 million
+  iterations (~137 s); no file change. Do not run it against firmware.
+- Towelroot/futex (`CVE-2014-3153`): corrected `FUTEX_CMP_REQUEUE_PI` same-address probe returned `-1/EINVAL`;
+  requeue validation is patched.
+- Stock recovery: OTA trigger works, but unsigned ZIP is rejected. The only observed side effect was Dalvik-cache
+  rebuild/"Optimizing apps"; firmware hash stayed unchanged.
+- Fastboot: `adb reboot bootloader`, `reboot fastboot`, and `sys.fastboot.enable=true` did not expose fastboot.
+- HmFTP exported system-uid service: default anonymous FTP home is `/sdcard/`, not a root/system path; no root
+  primitive found.
+- Public `iovyroot`/CVE-2015-1805 source has only ARM/ARM64 device-specific offsets; no MIPS offsets for this
+  kernel/build. Porting requires kernel addresses and a MIPS payload.
+
+### Remaining plausible root paths
+1. Port CVE-2015-1805/iovyroot to this exact MIPS kernel after obtaining kernel symbols/boot image. High crash risk;
+   no blind run performed.
+2. Find a uid-1000 exported-component vulnerability in HmLab/OtaWatch/WearServices/HmFTP. Static inventory found
+   exported components but no proven code-execution primitive.
+3. Recover a Huami-signed OTA package/key or exploit recovery verification. No bypass found.
+4. Physical SPI/SWD programming is the most reliable firmware route but unavailable by constraint.
+
+Current conclusion: **no root method is proven**. The safest achieved capability is rootless direct SensorHub/KLVP
+control and the V16 HRV app.

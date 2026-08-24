@@ -1,0 +1,7 @@
+**/obj/
+**/dexout/
+*.idsig
+*.mips
+*.zip
+multirate-probe/*.apk
+sport-probe/*.apk
