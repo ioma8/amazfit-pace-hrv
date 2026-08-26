@@ -15,13 +15,12 @@ import android.view.WindowManager;
  *  windows with 50% overlap, pitch -> note + cents, round gauge UI; vibrates
  *  once on entering in-tune. The displayed cents/frequency are smoothed
  *  within a note and the last note is held briefly when the gate drops, so
- *  the needle stays steady on noisy input. */
+ *  the needle stays steady on noisy input. Note switching is handled by
+ *  PitchTracker (lock-in, attack suppression, median smoothing). */
 public class MainActivity extends Activity {
     static final String TAG = "Tuner";
     static final int FS = 16000;
     static final int CHUNK = Tuner.N / 2; // 50% overlap: 2048-sample hop
-    /** Gate-drop display hold: keep the last note on screen briefly. */
-    static final long HOLD_MS = 300;
 
     private TunerView view;
     private Tuner tuner;
@@ -29,10 +28,9 @@ public class MainActivity extends Activity {
     private volatile boolean running = true;
     private Thread worker;
 
-    // display stability state (audio thread only)
-    private String lastNote = null;
-    private float smoothCents = 0f;
-    private float smoothFreq = 0f;
+    // display stability (audio thread only)
+    private final PitchTracker tracker = new PitchTracker();
+    private String lastNoteShown = null;
     private boolean wasInTune = false;
 
     @Override
@@ -71,8 +69,6 @@ public class MainActivity extends Activity {
         short[] chunk = new short[CHUNK];
         int warmed = 0; // samples accumulated, capped at N to avoid overflow
         int peak = 0;
-        Tuner.Result held = null;
-        long heldUntil = 0;
         ar.startRecording();
         while (running) {
             int r = ar.read(chunk, 0, CHUNK);
@@ -98,37 +94,28 @@ public class MainActivity extends Activity {
                 continue;
             }
             Tuner.Result res = tuner.analyze(window);
-            if (res != null) {
-                held = res;
-                heldUntil = now + HOLD_MS;
-            } else if (held != null && now < heldUntil) {
-                res = held; // suppress flicker while the string decays
-            }
-            if (res == null) {
+            tracker.update(res, now);
+            if (!tracker.isActive(now)) {
+                wasInTune = false;
+                lastNoteShown = null;
                 view.setIdle(level);
                 continue;
             }
-            // smooth within a note; reset instantly when the note changes
-            if (!res.note.equals(lastNote)) {
-                lastNote = res.note;
-                smoothCents = res.cents;
-                smoothFreq = res.freq;
+            if (lastNoteShown == null || !lastNoteShown.equals(tracker.note())) {
+                lastNoteShown = tracker.note();
                 wasInTune = false;
-            } else {
-                smoothCents += 0.5f * (res.cents - smoothCents);
-                smoothFreq += 0.5f * (res.freq - smoothFreq);
             }
             // in-tune hysteresis: enter at 2 cents, exit at 4, so the needle
             // and the vibrate tick do not chatter at the boundary
             boolean inTune = wasInTune
-                    ? Math.abs(smoothCents) < 4f
-                    : Math.abs(smoothCents) < 2f;
+                    ? Math.abs(tracker.cents()) < 4f
+                    : Math.abs(tracker.cents()) < 2f;
             if (inTune && !wasInTune && vibrator != null) {
                 vibrator.vibrate(15);
             }
             wasInTune = inTune;
-            view.setResult(res.note, res.midi, smoothCents, smoothFreq,
-                    inTune, level);
+            view.setResult(tracker.note(), tracker.midi(), tracker.cents(),
+                    tracker.freq(), inTune, level);
         }
         ar.stop();
         ar.release();
