@@ -255,12 +255,12 @@ final class Engine3d {
             s = 255;
         } else {
             float d = (nx * LIGHT_X + ny * LIGHT_Y + nz * LIGHT_Z) / nl;
-            float v = 0.45f + 0.55f * d;
-            s = v < 0.35f ? 90 : v > 1f ? 255 : (int) (v * 255f);
+            float v = 0.28f + 0.72f * d;
+            s = v < 0.18f ? 46 : v > 1f ? 255 : (int) (v * 255f);
         }
-        int r = (232 * s) >> 8;   // copper base 0xE8A86B
-        int g = (168 * s) >> 8;
-        int b = (107 * s) >> 8;
+        int r = (250 * s) >> 8;   // vivid copper base 0xFA9648
+        int g = (150 * s) >> 8;
+        int b = (72 * s) >> 8;
         return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 

@@ -349,6 +349,23 @@ final class Engine3d {
 
     /** Scanline rasterizer: perspective-correct texture mapping + per-pixel
      *  spherical normal lighting. */
+    /** 1.25x contrast around mid-gray, then 1.5x saturation; clamped. */
+    private static int boost(int r, int g, int b) {
+        r = (((r - 128) * 5) >> 2) + 128;
+        g = (((g - 128) * 5) >> 2) + 128;
+        b = (((b - 128) * 5) >> 2) + 128;
+        int mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+        int mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+        int mid = (mx + mn) >> 1;
+        r += (r - mid) >> 1;
+        g += (g - mid) >> 1;
+        b += (b - mid) >> 1;
+        if (r < 0) r = 0; else if (r > 255) r = 255;
+        if (g < 0) g = 0; else if (g > 255) g = 255;
+        if (b < 0) b = 0; else if (b > 255) b = 255;
+        return (r << 16) | (g << 8) | b;
+    }
+
     private void rasterAll() {
         int wl = w;
         int hl = h;
@@ -495,14 +512,15 @@ final class Engine3d {
                     // dragged view coordinates: the terminator stays locked
                     // to the geographic texture while the globe is dragged.
                     float d = nx * sunX + ny * sunY + nz * sunZ;
-                    float shadow = d <= -0.06f ? 0.92f
+                    float shadow = d <= -0.06f ? 0.98f
                             : d >= 0.06f ? 0f
-                            : 0.92f * (0.06f - d) / 0.12f;
+                            : 0.98f * (0.06f - d) / 0.12f;
                     float visible = 1f - shadow;
                     int r = (int) (((c >> 16) & 255) * visible);
                     int g = (int) (((c >> 8) & 255) * visible);
                     int b = (int) ((c & 255) * visible);
-                    buf[zi] = 0xFF000000 | (r << 16) | (g << 8) | b;
+                    // contrast + saturation boost so the day side pops
+                    buf[zi] = 0xFF000000 | boost(r, g, b);
                     statsPixels++;
                 }
             }
