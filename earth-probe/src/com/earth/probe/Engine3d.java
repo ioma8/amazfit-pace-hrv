@@ -5,15 +5,20 @@ import java.util.Arrays;
 /**
  * Software rasterizer ported from the render3d-probe teapot demo (ioma8/3drend
  * engine3d.ts): near-plane clip, backface cull, painter sort, per-pixel 1/z
- * z-buffer, flat shade. Adapted for the Earth demo:
+ * z-buffer — now with perspective-correct TEXTURE MAPPING and per-pixel
+ * spherical shadowing:
  *
- *  - the light direction is an instance field updated each frame from the real
- *    sun azimuth/elevation (SkyMath) rotated into camera space, so the
- *    day/night terminator follows the actual sky for the current location
- *    while the globe spins on its fixed 23.44-deg tilted axis;
- *  - shading uses the outward normal: day color = base color, night = base
- *    dimmed, with a soft terminator and a bluish rim glow at the silhouette;
- *  - no touch drag, the spin never pauses.
+ *  - u/z and v/z are interpolated per pixel (perspective-correct u,v);
+ *  - the surface normal is derived analytically from the texture coords
+ *    (sin/cos lookup tables), rotated by the per-frame model matrix;
+ *  - the single Blue Marble texture is copied unchanged on the day side and
+ *    reused under a black shadow overlay on the night side — no diffuse
+ *    lighting, night-lights texture, or rim-color modulation;
+ *  - texture seam (u = 0/1) handled by shifting u across the wrap.
+ *
+ * The sun direction is updated each frame from the real sun azimuth/elevation
+ * (SkyMath, setSunWorld); the globe stays still until touch drag changes its
+ * yaw/pitch.
  */
 final class Engine3d {
     static final float FOV = 70f * (float) Math.PI / 180f;
@@ -25,6 +30,9 @@ final class Engine3d {
     static final float SPIN = 0.012f; // model yaw per frame (~8.7 s/rev)
     static final int BG = 0xFF02040A;
 
+    static final int TW = 1024; // texture width
+    static final int TH = 512;  // texture height
+
     final int w;
     final int h;
     final int[] pixels;
@@ -33,39 +41,41 @@ final class Engine3d {
     /** Camera-space unit direction toward the sun, set per frame. */
     float sunX, sunY, sunZ;
 
-    /** World-frame sun (+X east, +Y up, -Z north) -> camera-space light. The
-     *  model-transform's yaw convention mirrors camera-space x and y (the
-     *  teapot framing), so they are negated; camera pitch is applied first. */
-    void setSunWorld(float wx, float wy, float wz) {
-        float cosP = (float) Math.cos(PITCH);
-        float sinP = (float) Math.sin(PITCH);
-        sunZ = wy * sinP + wz * cosP;
-        sunY = -(wy * cosP - wz * sinP);
-        sunX = -wx;
-    }
+    /** Texture (RGB ints, TW*TH), set once at startup. */
+    int[] tex;
 
-    // per-triangle camera-space vertices (9 floats per tri, indexed like the mesh)
+    // per-triangle camera-space vertices and u/z, v/z (9 floats per tri)
     private final float[] cx;
     private final float[] cy;
     private final float[] cz;
+    private final float[] cuz;
+    private final float[] cvz;
     // near-clip scratch: up to 4 vertices
     private final float[] clipX = new float[4];
     private final float[] clipY = new float[4];
     private final float[] clipZ = new float[4];
-    // drawn triangle storage (screen-space verts, depth, color)
+    private final float[] clipU = new float[4];
+    private final float[] clipV = new float[4];
+    // drawn triangle storage (screen-space verts, depth, tex coords /z)
     private final float[] sx3;
     private final float[] sy3;
     private final float[] siz3;
+    private final float[] suz;
+    private final float[] svz;
     private final float[] depth;
-    private final int[] color;
     private final int[] order;
     private int drawn;
 
     private final float focal;
-    private float modelYaw = 0.4f;
-    private float modelPitch = TILT;
+    private volatile float modelYaw = 0.4f; // Greenwich + 0.4 rad faces the camera
+    private volatile float modelPitch = TILT;
     int statsTris;
     int statsPixels;
+
+    // per-frame model rotation matrix (Rx(tilt) * Ry(yaw))
+    private float m00, m01, m02, m10, m11, m12, m20, m21, m22;
+    // normal tables indexed by texel: theta = u*2pi, phi = v*pi
+    private final float[] sinTh, cosTh, sinPh, cosPh;
 
     Engine3d(int w, int h, int maxTris) {
         this.w = w;
@@ -77,23 +87,73 @@ final class Engine3d {
         cx = new float[n9];
         cy = new float[n9];
         cz = new float[n9];
+        cuz = new float[n9];
+        cvz = new float[n9];
         int cap = maxTris * 2;
         sx3 = new float[cap * 3];
         sy3 = new float[cap * 3];
         siz3 = new float[cap * 3];
+        suz = new float[cap * 3];
+        svz = new float[cap * 3];
         depth = new float[cap];
-        color = new int[cap];
         order = new int[cap];
+
+        sinTh = new float[TW];
+        cosTh = new float[TW];
+        for (int i = 0; i < TW; i++) {
+            double th = i * 2.0 * Math.PI / TW;
+            sinTh[i] = (float) Math.sin(th);
+            cosTh[i] = (float) Math.cos(th);
+        }
+        sinPh = new float[TH];
+        cosPh = new float[TH];
+        for (int i = 0; i < TH; i++) {
+            double ph = i * Math.PI / TH;
+            sinPh[i] = (float) Math.sin(ph);
+            cosPh[i] = (float) Math.cos(ph);
+        }
+    }
+
+    void setTexture(int[] rgb) {
+        tex = rgb;
+    }
+
+    /** World-frame sun (+X east, +Y up, +Z north) -> renderer frame. The
+     *  displayed Blue Marble longitude is mirrored horizontally, so east/west
+     *  must be mirrored here as well to keep the shadow aligned with the map. */
+    void setSunWorld(float wx, float wy, float wz) {
+        sunX = -wx;
+        sunY = wy;
+        sunZ = wz;
+    }
+
+    /** Rotate the globe from a drag delta. No automatic motion. */
+    void rotateBy(float dyaw, float dpitch) {
+        modelYaw += dyaw;
+        modelPitch += dpitch;
+        if (modelPitch < -1.4f) {
+            modelPitch = -1.4f;
+        } else if (modelPitch > 1.4f) {
+            modelPitch = 1.4f;
+        }
     }
 
     void frame(Mesh m) {
-        modelYaw += SPIN;
         float cM = (float) Math.cos(modelYaw);
         float sM = (float) Math.sin(modelYaw);
         float cT = (float) Math.cos(modelPitch);
         float sT = (float) Math.sin(modelPitch);
         float cosP = (float) Math.cos(PITCH);
         float sinP = (float) Math.sin(PITCH);
+        m00 = cM;
+        m01 = 0f;
+        m02 = sM;
+        m10 = sM * sT;
+        m11 = cT;
+        m12 = -cM * sT;
+        m20 = -sM * cT;
+        m21 = sT;
+        m22 = cM * cT;
         drawn = 0;
         statsTris = 0;
         statsPixels = 0;
@@ -103,7 +163,8 @@ final class Engine3d {
         float[] vx = m.vx;
         float[] vy = m.vy;
         float[] vz = m.vz;
-        int[] base = m.baseColor;
+        float[] tu = m.tu;
+        float[] tv = m.tv;
         int n = m.triCount;
         for (int t = 0; t < n; t++) {
             int b = t * 9;
@@ -123,6 +184,8 @@ final class Engine3d {
                 cx[i] = xr;
                 cy[i] = y2;
                 cz[i] = z2;
+                cuz[i] = tu[i] / z2;
+                cvz[i] = tv[i] / z2;
                 if (z2 <= NEAR) {
                     anyNear = true;
                 } else {
@@ -133,9 +196,9 @@ final class Engine3d {
                 continue;
             }
             if (anyNear) {
-                clipAndFinish(b, base[t]);
+                clipAndFinish(b);
             } else {
-                finish(b, base[t]);
+                finish(b);
             }
         }
 
@@ -144,8 +207,9 @@ final class Engine3d {
         rasterAll();
     }
 
-    /** Sutherland-Hodgman clip against z = NEAR; fans out 0..2 triangles. */
-    private void clipAndFinish(int b, int base) {
+    /** Sutherland-Hodgman clip against z = NEAR; fans out 0..2 triangles.
+     *  u/z and v/z interpolate linearly like the positions. */
+    private void clipAndFinish(int b) {
         int outN = 0;
         for (int k = 0; k < 3; k++) {
             int cur = k * 3;
@@ -156,6 +220,8 @@ final class Engine3d {
                 clipX[outN] = cx[b + cur];
                 clipY[outN] = cy[b + cur];
                 clipZ[outN] = cz[b + cur];
+                clipU[outN] = cuz[b + cur];
+                clipV[outN] = cvz[b + cur];
                 outN++;
             }
             if (curIn != nxtIn) {
@@ -163,31 +229,32 @@ final class Engine3d {
                 clipX[outN] = cx[b + cur] + (cx[b + nxt] - cx[b + cur]) * tt;
                 clipY[outN] = cy[b + cur] + (cy[b + nxt] - cy[b + cur]) * tt;
                 clipZ[outN] = NEAR;
+                clipU[outN] = cuz[b + cur] + (cuz[b + nxt] - cuz[b + cur]) * tt;
+                clipV[outN] = cvz[b + cur] + (cvz[b + nxt] - cvz[b + cur]) * tt;
                 outN++;
             }
         }
         if (outN >= 3) {
             for (int i = 1; i < outN - 1; i++) {
-                finish3(clipX[0], clipY[0], clipZ[0],
-                        clipX[i], clipY[i], clipZ[i],
-                        clipX[i + 1], clipY[i + 1], clipZ[i + 1], base);
+                finish3(clipX[0], clipY[0], clipZ[0], clipU[0], clipV[0],
+                        clipX[i], clipY[i], clipZ[i], clipU[i], clipV[i],
+                        clipX[i + 1], clipY[i + 1], clipZ[i + 1],
+                        clipU[i + 1], clipV[i + 1]);
             }
         }
     }
 
-    private void finish(int b, int base) {
-        finish3(cx[b], cy[b], cz[b],
-                cx[b + 3], cy[b + 3], cz[b + 3],
-                cx[b + 6], cy[b + 6], cz[b + 6], base);
+    private void finish(int b) {
+        finish3(cx[b], cy[b], cz[b], cuz[b], cvz[b],
+                cx[b + 3], cy[b + 3], cz[b + 3], cuz[b + 3], cvz[b + 3],
+                cx[b + 6], cy[b + 6], cz[b + 6], cuz[b + 6], cvz[b + 6]);
     }
 
-    /**
-     * Backface cull (normal vs centroid, camera space), flat shade from the
-     * same cross product, perspective project.
-     */
-    private void finish3(float ax, float ay, float az,
-            float bx, float by, float bz,
-            float cxx, float cyy, float czz, int base) {
+    /** Backface cull (normal vs centroid, camera space), perspective project,
+     *  store screen verts + 1/z + u/z + v/z. */
+    private void finish3(float ax, float ay, float az, float au, float av,
+            float bx, float by, float bz, float bu, float bv,
+            float cxx, float cyy, float czz, float cu, float cv) {
         float abx = bx - ax, aby = by - ay, abz = bz - az;
         float acx = cxx - ax, acy = cyy - ay, acz = czz - az;
         float nx = aby * acz - abz * acy;
@@ -202,64 +269,44 @@ final class Engine3d {
         if (az <= NEAR || bz <= NEAR || czz <= NEAR) {
             return; // degenerate after clip
         }
+        // seam wrap: if the triangle spans u = 0/1, shift u < 0.5 up by 1
+        float u0 = au / (1f / az);
+        float u1 = bu / (1f / bz);
+        float u2 = cu / (1f / czz);
+        float uMin = Math.min(u0, Math.min(u1, u2));
+        float uMax = Math.max(u0, Math.max(u1, u2));
+        if (uMax - uMin > 0.5f) {
+            float iz0 = 1f / az;
+            float iz1 = 1f / bz;
+            float iz2 = 1f / czz;
+            if (u0 < 0.5f) au += iz0;
+            if (u1 < 0.5f) bu += iz1;
+            if (u2 < 0.5f) cu += iz2;
+        }
         int o = drawn * 3;
         float hw = w / 2f;
         float hh = h / 2f;
+        float iz0 = 1f / az;
+        float iz1 = 1f / bz;
+        float iz2 = 1f / czz;
         sx3[o] = hw + focal * (ax / az);
         sy3[o] = hh - focal * (ay / az);
-        siz3[o] = 1f / az;
+        siz3[o] = iz0;
+        suz[o] = au;
+        svz[o] = av;
         sx3[o + 1] = hw + focal * (bx / bz);
         sy3[o + 1] = hh - focal * (by / bz);
-        siz3[o + 1] = 1f / bz;
+        siz3[o + 1] = iz1;
+        suz[o + 1] = bu;
+        svz[o + 1] = bv;
         sx3[o + 2] = hw + focal * (cxx / czz);
         sy3[o + 2] = hh - focal * (cyy / czz);
-        siz3[o + 2] = 1f / czz;
+        siz3[o + 2] = iz2;
+        suz[o + 2] = cu;
+        svz[o + 2] = cv;
         depth[drawn] = (az + bz + czz) / 3f;
-        color[drawn] = shadedColor(nx, ny, nz, cxm, cym, czm, base);
         drawn++;
         statsTris++;
-    }
-
-    /**
-     * Day/night shade from the outward normal vs the per-frame sun direction:
-     * lit = clamp(-n . sun / 0.12) gives a soft terminator; night = base
-     * dimmed to 13%. Rim glow: bluish, strongest at the silhouette edge.
-     */
-    private int shadedColor(float nx, float ny, float nz,
-            float cxm, float cym, float czm, int base) {
-        float nl = (float) Math.sqrt(nx * nx + ny * ny + nz * nz);
-        float lit;
-        if (nl == 0f) {
-            lit = 1f;
-        } else {
-            float ox = -nx / nl;
-            float oy = -ny / nl;
-            float oz = -nz / nl;
-            float d = ox * sunX + oy * sunY + oz * sunZ;
-            lit = d <= 0f ? 0f : d >= 0.12f ? 1f : d / 0.12f;
-
-            // rim glow: 1 - (outward normal . view direction), squared
-            float vl = (float) Math.sqrt(cxm * cxm + cym * cym + czm * czm);
-            if (vl > 0f) {
-                float rim = ox * (cxm / vl) + oy * (cym / vl) + oz * (czm / vl);
-                rim = 1f - rim;
-                rim *= rim;
-                if (rim > 0f) {
-                    int r0 = (base >> 16) & 255;
-                    int g0 = (base >> 8) & 255;
-                    int b0 = base & 255;
-                    float f = rim * 0.4f;
-                    base = 0xFF000000
-                            | ((int) (r0 + (255 - r0) * f * 0.35f) << 16)
-                            | ((int) (g0 + (255 - g0) * f * 0.55f) << 8)
-                            | (int) (b0 + (255 - b0) * f * 0.85f);
-                }
-            }
-        }
-        int r = (int) (((base >> 16) & 255) * (0.13f + 0.87f * lit));
-        int g = (int) (((base >> 8) & 255) * (0.13f + 0.87f * lit));
-        int b = (int) ((base & 255) * (0.13f + 0.87f * lit));
-        return 0xFF000000 | (r << 16) | (g << 8) | b;
     }
 
     /** Max-heap sort of drawn indices by depth, descending (far first). */
@@ -300,44 +347,64 @@ final class Engine3d {
         }
     }
 
-    /** Scanline rasterizer with per-pixel 1/z z-buffer (engine3d.ts raster()). */
+    /** Scanline rasterizer: perspective-correct texture mapping + per-pixel
+     *  spherical normal lighting. */
     private void rasterAll() {
         int wl = w;
         int hl = h;
         int[] buf = pixels;
         float[] z = zbuf;
+        int[] texture = tex;
+        if (texture == null) {
+            return;
+        }
         for (int di = 0; di < drawn; di++) {
             int t = order[di];
             int o = t * 3;
             float v0x = sx3[o], v0y = sy3[o], v0z = siz3[o];
+            float v0u = suz[o], v0v = svz[o];
             float v1x = sx3[o + 1], v1y = sy3[o + 1], v1z = siz3[o + 1];
+            float v1u = suz[o + 1], v1v = svz[o + 1];
             float v2x = sx3[o + 2], v2y = sy3[o + 2], v2z = siz3[o + 2];
+            float v2u = suz[o + 2], v2v = svz[o + 2];
             if (v1y < v0y) {
-                float tx = v0x, ty = v0y, tz = v0z;
+                float tx = v0x, ty = v0y, tz = v0z, tu = v0u, tv = v0v;
                 v0x = v1x;
                 v0y = v1y;
                 v0z = v1z;
+                v0u = v1u;
+                v0v = v1v;
                 v1x = tx;
                 v1y = ty;
                 v1z = tz;
+                v1u = tu;
+                v1v = tv;
             }
             if (v2y < v0y) {
-                float tx = v0x, ty = v0y, tz = v0z;
+                float tx = v0x, ty = v0y, tz = v0z, tu = v0u, tv = v0v;
                 v0x = v2x;
                 v0y = v2y;
                 v0z = v2z;
+                v0u = v2u;
+                v0v = v2v;
                 v2x = tx;
                 v2y = ty;
                 v2z = tz;
+                v2u = tu;
+                v2v = tv;
             }
             if (v2y < v1y) {
-                float tx = v1x, ty = v1y, tz = v1z;
+                float tx = v1x, ty = v1y, tz = v1z, tu = v1u, tv = v1v;
                 v1x = v2x;
                 v1y = v2y;
                 v1z = v2z;
+                v1u = v2u;
+                v1v = v2v;
                 v2x = tx;
                 v2y = ty;
                 v2z = tz;
+                v2u = tu;
+                v2v = tv;
             }
             int yTop = v0y > 0f ? (int) Math.ceil(v0y) : 0;
             int yBot = v2y < hl - 1 ? (int) Math.floor(v2y) : hl - 1;
@@ -347,34 +414,49 @@ final class Engine3d {
             float invDx = v1y != v0y ? 1f / (v1y - v0y) : 0f;
             float invDx2 = v2y != v0y ? 1f / (v2y - v0y) : 0f;
             float invDx3 = v2y != v1y ? 1f / (v2y - v1y) : 0f;
-            int col = color[t];
             for (int y = yTop; y <= yBot; y++) {
                 float fy = y;
                 float tL = (fy - v0y) * invDx2;
                 float longX = v0x + (v2x - v0x) * tL;
                 float longIz = v0z + (v2z - v0z) * tL;
+                float longU = v0u + (v2u - v0u) * tL;
+                float longV = v0v + (v2v - v0v) * tL;
                 float xS;
                 float sIz;
+                float sU;
+                float sV;
                 if (fy < v1y) {
                     float tS = (fy - v0y) * invDx;
                     xS = v0x + (v1x - v0x) * tS;
                     sIz = v0z + (v1z - v0z) * tS;
+                    sU = v0u + (v1u - v0u) * tS;
+                    sV = v0v + (v1v - v0v) * tS;
                 } else {
                     float tS = (fy - v1y) * invDx3;
                     xS = v1x + (v2x - v1x) * tS;
                     sIz = v1z + (v2z - v1z) * tS;
+                    sU = v1u + (v2u - v1u) * tS;
+                    sV = v1v + (v2v - v1v) * tS;
                 }
-                float xL, xR, lIz, rIz;
+                float xL, xR, lIz, rIz, lU, rU, lV, rV;
                 if (longX <= xS) {
                     xL = longX;
                     lIz = longIz;
+                    lU = longU;
+                    lV = longV;
                     xR = xS;
                     rIz = sIz;
+                    rU = sU;
+                    rV = sV;
                 } else {
                     xL = xS;
                     lIz = sIz;
+                    lU = sU;
+                    lV = sV;
                     xR = longX;
                     rIz = longIz;
+                    rU = longU;
+                    rV = longV;
                 }
                 int x0 = xL > 0f ? (int) Math.ceil(xL) : 0;
                 int x1 = xR < wl - 1 ? (int) Math.floor(xR) : wl - 1;
@@ -392,7 +474,37 @@ final class Engine3d {
                         continue;
                     }
                     z[zi] = iz;
-                    buf[zi] = col;
+                    float invIz = 1f / iz;
+                    float u = (lU + (rU - lU) * tt) * invIz;
+                    float v = (lV + (rV - lV) * tt) * invIz;
+                    int tx = ((int) (u * TW)) & (TW - 1);
+                    // Blue Marble is east/west mirrored relative to the
+                    // sphere's longitude convention. Use the displayed
+                    // longitude for both texture and shadow normal.
+                    tx = TW - 1 - tx;
+                    int ty = (int) (v * TH);
+                    if (ty < 0) ty = 0;
+                    if (ty >= TH) ty = TH - 1;
+                    int c = texture[ty * TW + tx];
+                    // spherical normal from the displayed texel
+                    float nx = sinPh[ty] * sinTh[tx];
+                    float ny = cosPh[ty];
+                    float nz = sinPh[ty] * cosTh[tx];
+                    // rotate to camera space
+                    float rnx = m00 * nx + m02 * nz;
+                    float rny = m10 * nx + m11 * ny + m12 * nz;
+                    float rnz = m20 * nx + m21 * ny + m22 * nz;
+                    // Keep the texture unchanged in daylight. Apply only a
+                    // black shadow overlay on the night side.
+                    float d = rnx * sunX + rny * sunY + rnz * sunZ;
+                    float shadow = d <= -0.06f ? 0.92f
+                            : d >= 0.06f ? 0f
+                            : 0.92f * (0.06f - d) / 0.12f;
+                    float visible = 1f - shadow;
+                    int r = (int) (((c >> 16) & 255) * visible);
+                    int g = (int) (((c >> 8) & 255) * visible);
+                    int b = (int) ((c & 255) * visible);
+                    buf[zi] = 0xFF000000 | (r << 16) | (g << 8) | b;
                     statsPixels++;
                 }
             }

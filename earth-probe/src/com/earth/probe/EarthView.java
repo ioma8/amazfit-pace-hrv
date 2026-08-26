@@ -2,13 +2,14 @@ package com.earth.probe;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.os.Process;
 import android.util.Log;
+import android.view.MotionEvent;
 
-import java.io.IOException;
 import java.util.Random;
 
 /**
@@ -16,10 +17,12 @@ import java.util.Random;
  * THREAD_PRIORITY_URGENT_AUDIO, half-resolution bitmap upscaled bilinear,
  * 16 ms pacing, GC-free hot loop, FPS logged every 60 frames.
  *
- * Per frame the engine's sun direction is set from the real solar azimuth and
- * elevation (SkyMath) at the current location, rotated into camera space, so
- * the terminator tracks the actual sky; the globe spins on its tilted axis.
- * A static star field is painted around the globe silhouette.
+ * The Blue Marble texture (res/drawable-nodpi/earth.jpg) is decoded once via
+ * BitmapFactory and downscaled to the engine's texture size. Per frame the
+ * engine's sun direction is set from the real solar azimuth and elevation
+ * (SkyMath) at the current location, so only the current night-side shadow
+ * changes. The globe stays still until a touch drag rotates it. A static star
+ * field is painted around the globe silhouette.
  */
 public class EarthView extends android.view.View {
     private static final String TAG = "Earth3D";
@@ -37,6 +40,9 @@ public class EarthView extends android.view.View {
     private final float[] starX = new float[45];
     private final float[] starY = new float[45];
     private final int[] starC = new int[45];
+    private float lastX;
+    private float lastY;
+    private int activePointer = -1;
 
     private volatile double lat = 49.82; // Ostrava fallback
     private volatile double lon = 18.26;
@@ -47,18 +53,34 @@ public class EarthView extends android.view.View {
 
     public EarthView(Context c) {
         super(c);
-        Mesh m = null;
+        mesh = Mesh.sphere();
+        engine = new Engine3d(RW, RH, mesh.triCount);
         boolean failed = false;
         try {
-            m = Mesh.sphere(Mesh.loadLand(
-                    c.getResources().openRawResource(R.raw.land)));
-        } catch (IOException e) {
-            Log.e(TAG, "landmask load failed", e);
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inSampleSize = 4; // 5400x2700 -> 1350x675, avoids a huge bitmap
+            Bitmap big = BitmapFactory.decodeResource(
+                    c.getResources(), R.drawable.earth, o);
+            if (big == null) {
+                throw new IllegalStateException("decode returned null");
+            }
+            Bitmap tex = Bitmap.createScaledBitmap(big,
+                    Engine3d.TW, Engine3d.TH, true);
+            if (tex != big) {
+                big.recycle();
+            }
+            int[] px = new int[Engine3d.TW * Engine3d.TH];
+            tex.getPixels(px, 0, Engine3d.TW, 0, 0, Engine3d.TW, Engine3d.TH);
+            tex.recycle();
+            for (int i = 0; i < px.length; i++) {
+                px[i] &= 0xFFFFFF;
+            }
+            engine.setTexture(px);
+        } catch (Exception e) {
+            Log.e(TAG, "texture load failed", e);
             failed = true;
         }
-        mesh = m;
         loadFailed = failed;
-        engine = new Engine3d(RW, RH, mesh != null ? mesh.triCount : 1);
         bitmap = Bitmap.createBitmap(RW, RH, Bitmap.Config.ARGB_8888);
         text.setColor(0xFF7A8896);
         text.setTextSize(9f * c.getResources().getDisplayMetrics().density);
@@ -104,14 +126,43 @@ public class EarthView extends android.view.View {
         thread.start();
     }
 
+    @Override
+    public boolean onTouchEvent(MotionEvent ev) {
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                activePointer = ev.getPointerId(0);
+                lastX = ev.getX();
+                lastY = ev.getY();
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                if (activePointer >= 0) {
+                    int index = ev.findPointerIndex(activePointer);
+                    if (index >= 0) {
+                        float x = ev.getX(index);
+                        float y = ev.getY(index);
+                        engine.rotateBy(-(x - lastX) * 0.010f,
+                                -(y - lastY) * 0.010f);
+                        lastX = x;
+                        lastY = y;
+                    }
+                }
+                return true;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                activePointer = -1;
+                return true;
+            default:
+                return true;
+        }
+    }
+
     void setLocation(double lat, double lon, boolean gps) {
         this.lat = lat;
         this.lon = lon;
         this.hasGps = gps;
     }
 
-    /** Real sun direction -> camera space. World: +Y up, +X east, -Z north;
-     *  camera sits at -Z looking +Z (south), pitched down by PITCH. */
+    /** Real sun direction -> world frame; setSunWorld handles the camera. */
     private void setSun() {
         long now = System.currentTimeMillis();
         double[] p = SkyMath.sunPosition(now, lat, lon);
@@ -119,7 +170,7 @@ public class EarthView extends android.view.View {
         double az = p[1];
         float wx = (float) (Math.cos(el) * Math.sin(az)); // east
         float wy = (float) Math.sin(el);                  // up
-        float wz = (float) (-Math.cos(el) * Math.cos(az)); // south
+        float wz = (float) (Math.cos(el) * Math.cos(az)); // north (+Z)
         engine.setSunWorld(wx, wy, wz);
     }
 
@@ -156,7 +207,7 @@ public class EarthView extends android.view.View {
         cv.drawBitmap(bitmap, null, dst, filter);
         float d = getResources().getDisplayMetrics().density;
         if (loadFailed) {
-            cv.drawText("landmask load failed", w / 2f, h / 2f, text);
+            cv.drawText("texture load failed", w / 2f, h / 2f, text);
         } else {
             cv.drawText(String.format("%.0f fps · %d tris", fps, engine.statsTris),
                     w / 2f, h - 8 * d, text);

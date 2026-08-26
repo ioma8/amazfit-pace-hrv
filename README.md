@@ -28,7 +28,7 @@ A subsequent live watch run remained stable at 85–87 bpm, 31–36 ms RMSSD, an
 - [`seismo-probe/`](seismo-probe/) — accelerometer nebula seismograph (CPU fBm, 60 fps)
 - [`mic-probe/`](mic-probe/) — mic capture app with UI (record/stop, live waveform, speech DSP)
 - [`sunface-probe/`](sunface-probe/) — moon phase + sun times watch face (NOAA ephemeris, GPS location)
-- [`earth-probe/`](earth-probe/) — spinning Earth with the live day/night terminator (real sun position)
+- [`earth-probe/`](earth-probe/) — textured Earth with real-sun shadow, drag-only rotation
 - [`tuner-probe/`](tuner-probe/) — guitar tuner: FFT pitch detection on the 16 kHz mic, note + cents gauge
 - [`render3d-probe/`](render3d-probe/) — software 3D demo: rotating copper teapot, z-buffered rasterizer (3drend port)
 - [`wifi-serve/`](wifi-serve/) — "Pace Sync": watch WiFi AP + QR, serves mic recordings over HTTP to the phone
@@ -240,23 +240,23 @@ adb shell am start -n com.sunface.probe/.MainActivity
 adb emu geo fix 18.26 49.82    # feed GPS on the emulator
 ```
 
-## Spinning Earth (`earth-probe/`)
+## Textured Earth (`earth-probe/`)
 
-The render3d engine repurposed: a UV-sphere Earth (32×16, 1,024 tris,
-radius 85) colored per triangle from a 72×36 landmask rasterized from
-Natural Earth 110 m land polygons (`tools/gen_landmask.py`, `res/raw/land.txt`):
-ocean, land, and ice only where the mask says land (Antarctica/Greenland —
-the Arctic stays water). The globe spins (0.012 rad/frame) on its fixed
-23.44° tilted axis while the day/night terminator follows the real sun —
-azimuth/elevation from `SkyMath` at the current location, rotated into camera
-space every frame, so the lit side and terminator orientation match your
-actual sky at the moment you look at it. Soft terminator (0.12 dot width),
-bluish rim glow at the silhouette, static star field outside the globe.
+The render3d engine maps the supplied Blue Marble JPEG
+(`res/drawable-nodpi/earth.jpg`, `world.200407.3x5400x2700.jpg`) onto a
+64×32 UV sphere: 4,096 triangles, up from the original 1,024. Texture
+coordinates are perspective-correct and the horizontal longitude is corrected
+to match the supplied map.
 
-Emulator (pace AVD): 59 fps at ~210 drawn tris with GPS lock. The host test
-(`EarthTest.java`) renders at fixed sun directions and asserts: sphere fills
-the screen, day ≈ 8× brighter than night, east/west asymmetry at sunrise,
-green land visible in an afternoon sun.
+The texture is copied unchanged on the day side. The current sun position
+comes from `SkyMath` at the GPS location; the night side receives only a
+black shadow overlay with a soft terminator. No diffuse light tint, night
+lights, or colored rim glow is applied. The globe is stationary until
+horizontal/vertical touch drag rotates it; it does not auto-spin.
+
+Emulator (pace AVD): ~59 fps at ~846 drawn triangles with GPS lock. The host
+test (`EarthTest.java`) checks sphere coverage, day texture preservation,
+day/night shadow contrast, and directional shadow behavior.
 
 ```bash
 earth-probe/build.sh
