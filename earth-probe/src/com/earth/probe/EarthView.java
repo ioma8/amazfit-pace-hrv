@@ -10,6 +10,8 @@ import android.os.Process;
 import android.util.Log;
 import android.view.MotionEvent;
 
+import java.util.Calendar;
+import java.util.TimeZone;
 import java.util.Random;
 
 /**
@@ -19,9 +21,9 @@ import java.util.Random;
  *
  * The Blue Marble texture (res/drawable-nodpi/earth.jpg) is decoded once via
  * BitmapFactory and downscaled to the engine's texture size. Per frame the
- * engine's sun direction is set from the real solar azimuth and elevation
- * (SkyMath) at the current location, so only the current night-side shadow
- * changes. The globe stays still until a touch drag rotates it. A static star
+ * geocentric sun vector is computed from UTC solar declination and subsolar
+ * longitude, so the current shadow stays fixed to the geographic texture
+ * while the globe stays still until a touch drag rotates it. A static star
  * field is painted around the globe silhouette.
  */
 public class EarthView extends android.view.View {
@@ -162,16 +164,27 @@ public class EarthView extends android.view.View {
         this.hasGps = gps;
     }
 
-    /** Real sun direction -> world frame; setSunWorld handles the camera. */
+    /** Compute the geocentric direction to the Sun in Earth coordinates.
+     *  +Y is geographic north, +X is east at 90E, and +Z is the 180E
+     *  meridian. The vector is independent of the viewer's GPS location;
+     *  UTC determines the solar declination and subsolar longitude. */
     private void setSun() {
+        Calendar utc = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
         long now = System.currentTimeMillis();
-        double[] p = SkyMath.sunPosition(now, lat, lon);
-        double el = p[0];
-        double az = p[1];
-        float wx = (float) (Math.cos(el) * Math.sin(az)); // east
-        float wy = (float) Math.sin(el);                  // up
-        float wz = (float) (Math.cos(el) * Math.cos(az)); // north (+Z)
-        engine.setSunWorld(wx, wy, wz);
+        utc.setTimeInMillis(now);
+        double utcMin = utc.get(Calendar.HOUR_OF_DAY) * 60
+                + utc.get(Calendar.MINUTE)
+                + utc.get(Calendar.SECOND) / 60.0
+                + utc.get(Calendar.MILLISECOND) / 60000.0;
+        double[] eq = SkyMath.sunEq(utc.get(Calendar.DAY_OF_YEAR), utcMin);
+        double decl = eq[1];
+        double hourAngleDeg = (utcMin + eq[0]) / 4.0 - 180.0;
+        double subsolarLon = -hourAngleDeg * SkyMath.DEG;
+        float cosDecl = (float) Math.cos(decl);
+        engine.setSunWorld(
+                cosDecl * (float) Math.sin(subsolarLon),
+                (float) Math.sin(decl),
+                -cosDecl * (float) Math.cos(subsolarLon));
     }
 
     /** Static star field outside the globe silhouette (screen radius ~62). */

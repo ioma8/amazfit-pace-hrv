@@ -248,11 +248,12 @@ The render3d engine maps the supplied Blue Marble JPEG
 coordinates are perspective-correct and the horizontal longitude is corrected
 to match the supplied map.
 
-The texture is copied unchanged on the day side. The current sun position
-comes from `SkyMath` at the GPS location; the night side receives only a
-black shadow overlay with a soft terminator. No diffuse light tint, night
-lights, or colored rim glow is applied. The globe is stationary until
-horizontal/vertical touch drag rotates it; it does not auto-spin.
+The texture is copied unchanged on the day side. The geocentric sun vector is
+recomputed from UTC solar declination and subsolar longitude; the night side
+receives only a black shadow overlay with a soft terminator. No diffuse light
+tint, night lights, or colored rim glow is applied. The globe is stationary
+until horizontal/vertical touch drag rotates it; it does not auto-spin, and
+the shadow remains attached to the geographic texture during the drag.
 
 Emulator (pace AVD): ~59 fps at ~846 drawn triangles with GPS lock. The host
 test (`EarthTest.java`) checks sphere coverage, day texture preservation,

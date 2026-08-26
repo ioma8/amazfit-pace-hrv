@@ -16,9 +16,9 @@ import java.util.Arrays;
  *    lighting, night-lights texture, or rim-color modulation;
  *  - texture seam (u = 0/1) handled by shifting u across the wrap.
  *
- * The sun direction is updated each frame from the real sun azimuth/elevation
- * (SkyMath, setSunWorld); the globe stays still until touch drag changes its
- * yaw/pitch.
+ * The geocentric sun vector is updated each frame from UTC solar declination
+ * and subsolar longitude (SkyMath); it is independent of drag orientation, so
+ * the shadow stays attached to the geographic texture while the globe moves.
  */
 final class Engine3d {
     static final float FOV = 70f * (float) Math.PI / 180f;
@@ -118,11 +118,11 @@ final class Engine3d {
         tex = rgb;
     }
 
-    /** World-frame sun (+X east, +Y up, +Z north) -> renderer frame. The
-     *  displayed Blue Marble longitude is mirrored horizontally, so east/west
-     *  must be mirrored here as well to keep the shadow aligned with the map. */
+    /** Sun vector in Earth coordinates. The displayed texture is mirrored in
+     *  longitude, so EarthView supplies the matching geographic vector. This
+     *  vector is deliberately independent of drag orientation. */
     void setSunWorld(float wx, float wy, float wz) {
-        sunX = -wx;
+        sunX = wx;
         sunY = wy;
         sunZ = wz;
     }
@@ -486,17 +486,15 @@ final class Engine3d {
                     if (ty < 0) ty = 0;
                     if (ty >= TH) ty = TH - 1;
                     int c = texture[ty * TW + tx];
-                    // spherical normal from the displayed texel
-                    float nx = sinPh[ty] * sinTh[tx];
+                    // Geographic normal from the displayed texture position.
+                    // Its X sign matches the horizontal texture correction.
+                    float nx = -sinPh[ty] * sinTh[tx];
                     float ny = cosPh[ty];
                     float nz = sinPh[ty] * cosTh[tx];
-                    // rotate to camera space
-                    float rnx = m00 * nx + m02 * nz;
-                    float rny = m10 * nx + m11 * ny + m12 * nz;
-                    float rnz = m20 * nx + m21 * ny + m22 * nz;
-                    // Keep the texture unchanged in daylight. Apply only a
-                    // black shadow overlay on the night side.
-                    float d = rnx * sunX + rny * sunY + rnz * sunZ;
+                    // Shadow is evaluated in Earth coordinates, not the
+                    // dragged view coordinates: the terminator stays locked
+                    // to the geographic texture while the globe is dragged.
+                    float d = nx * sunX + ny * sunY + nz * sunZ;
                     float shadow = d <= -0.06f ? 0.92f
                             : d >= 0.06f ? 0f
                             : 0.92f * (0.06f - d) / 0.12f;
