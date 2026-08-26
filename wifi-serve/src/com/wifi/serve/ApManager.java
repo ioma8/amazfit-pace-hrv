@@ -39,12 +39,15 @@ public final class ApManager {
         try {
             WifiManager wm = (WifiManager) ctx.getSystemService(Context.WIFI_SERVICE);
             WifiConfiguration cfg = new WifiConfiguration();
-            cfg.SSID = "\"" + SSID + "\"";
-            cfg.preSharedKey = "\"" + PASS + "\"";
+            cfg.SSID = SSID;
+            cfg.preSharedKey = PASS;
             cfg.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_PSK);
             cfg.priority = 1;
             Method setCfg = WifiManager.class.getMethod("setWifiApConfiguration", WifiConfiguration.class);
             Method setAp = WifiManager.class.getMethod("setWifiApEnabled", WifiConfiguration.class, boolean.class);
+            // Disable first so a stale live AP is torn down and the new
+            // config (SSID/pass) is actually applied on re-enable.
+            setAp.invoke(wm, cfg, Boolean.FALSE);
             setCfg.invoke(wm, cfg);
             setAp.invoke(wm, cfg, Boolean.TRUE);
             return true;
