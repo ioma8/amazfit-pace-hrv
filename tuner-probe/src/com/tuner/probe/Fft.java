@@ -2,7 +2,7 @@ package com.tuner.probe;
 
 /**
  * Iterative radix-2 complex FFT, in-place, pure java.*. Size must be a power
- * of two. Input: re[], im[] (im may be null -> zeros).
+ * of two; im must be non-null and the same length as re.
  */
 final class Fft {
     private Fft() {
@@ -10,9 +10,6 @@ final class Fft {
 
     static void fft(float[] re, float[] im) {
         int n = re.length;
-        if (im == null) {
-            im = new float[n];
-        }
         // bit-reversal permutation
         for (int i = 1, j = 0; i < n; i++) {
             int bit = n >> 1;

@@ -10,7 +10,7 @@ import android.view.View;
  * Round tuner UI: a circular cents dial (-50..+50) around a large note letter
  * with a superscript octave, a needle, a frequency readout, an input-level
  * bar, and a "pluck a string" idle hint. Pure Canvas; the audio thread calls
- * setResult()/setIdle() and invalidates.
+ * setResult()/setIdle()/setError() and invalidates.
  */
 public class TunerView extends View {
     private static final int CX = 160;
@@ -21,6 +21,7 @@ public class TunerView extends View {
     private final Paint dial = new Paint();
     private final Paint dialGood = new Paint();
     private final Paint tick = new Paint();
+    private final Paint tickLabel = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint needle = new Paint();
     private final Paint pivot = new Paint();
     private final Paint note = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -43,6 +44,7 @@ public class TunerView extends View {
     private volatile boolean inTune = false;
     private volatile boolean hasPitch = false;
     private volatile float level = 0f; // 0..1 input level
+    private volatile String error = null;
 
     public TunerView(Context c) {
         super(c);
@@ -59,6 +61,9 @@ public class TunerView extends View {
         dialGood.setStrokeWidth(6f);
         tick.setColor(0xFF3A5064);
         tick.setStrokeWidth(2f);
+        tickLabel.setColor(gray);
+        tickLabel.setTextAlign(Paint.Align.CENTER);
+        tickLabel.setTextSize(9f * d);
         needle.setColor(0xFFF5A623);
         needle.setStrokeWidth(3.5f);
         needle.setStrokeCap(Paint.Cap.ROUND);
@@ -104,6 +109,11 @@ public class TunerView extends View {
         postInvalidate();
     }
 
+    void setError(String msg) {
+        this.error = msg;
+        postInvalidate();
+    }
+
     private static float ang(float cents) {
         return 270f + cents * 2.4f; // -50 -> 150deg, 0 -> up, +50 -> 30deg
     }
@@ -129,16 +139,12 @@ public class TunerView extends View {
                     CX + cos * (DIAL_R - 3), CY + sin * (DIAL_R - 3), tick);
         }
         // endpoint labels
-        tick.setTextAlign(Paint.Align.CENTER);
-        tick.setTextSize(9f * getResources().getDisplayMetrics().density);
-        tick.setColor(gray);
         float a50 = ang(-50);
         cv.drawText("-50", CX + (float) Math.cos(rad(a50)) * (DIAL_R - 22),
-                CY + (float) Math.sin(rad(a50)) * (DIAL_R - 22) + 3, tick);
+                CY + (float) Math.sin(rad(a50)) * (DIAL_R - 22) + 3, tickLabel);
         a50 = ang(50);
         cv.drawText("+50", CX + (float) Math.cos(rad(a50)) * (DIAL_R - 22),
-                CY + (float) Math.sin(rad(a50)) * (DIAL_R - 22) + 3, tick);
-        tick.setTextAlign(Paint.Align.LEFT);
+                CY + (float) Math.sin(rad(a50)) * (DIAL_R - 22) + 3, tickLabel);
 
         // needle
         float na = ang(hasPitch ? cents : 0f);
@@ -167,9 +173,12 @@ public class TunerView extends View {
             cv.drawText(String.format("%.1f Hz", freq), CX, noteY + 24f, freqText);
         }
 
-        // status line
+        // status line (or hard error)
         status.setColor(inTune ? green : gray);
-        if (!hasPitch) {
+        if (error != null) {
+            status.setColor(0xFFC76B5E);
+            cv.drawText(error, CX, noteY + 52f, status);
+        } else if (!hasPitch) {
             cv.drawText("pluck a string", CX, noteY + 52f, status);
         } else if (inTune) {
             cv.drawText("in tune", CX, noteY + 52f, status);

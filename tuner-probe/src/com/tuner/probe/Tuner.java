@@ -2,9 +2,14 @@ package com.tuner.probe;
 
 /**
  * Pitch detection for a guitar tuner: Hann window, 4096-point FFT at 16 kHz
- * (3.906 Hz bins), peak search 59..1098 Hz with parabolic interpolation on
+ * (3.906 Hz bins), peak search 59..660 Hz with parabolic interpolation on
  * log-magnitudes (~0.1 bin accuracy -> ~0.4 Hz), nearest-semitone mapping to
  * note name + cents offset. Pure java.*, host-testable.
+ *
+ * The 660 Hz ceiling covers the highest guitar fundamental (E4 329.63 Hz)
+ * plus its second harmonic; excluding higher overtones keeps the detector
+ * from locking onto the 3rd harmonic of the upper strings instead of the
+ * fundamental.
  */
 final class Tuner {
     static final int N = 4096;
@@ -26,18 +31,16 @@ final class Tuner {
 
     /** Result of one analysis window; null when no clear fundamental. */
     static final class Result {
-        final float freq;      // detected frequency, Hz
-        final String note;     // nearest note name, e.g. "A"
-        final int midi;        // MIDI number (69 = A4)
-        final float cents;     // deviation from the note, -50..+50
-        final float peak;      // peak log-magnitude (for gain display)
+        final float freq;   // detected frequency, Hz
+        final String note;  // nearest note name, e.g. "A"
+        final int midi;     // MIDI number (69 = A4)
+        final float cents;  // deviation from the note, -50..+50
 
-        Result(float freq, String note, int midi, float cents, float peak) {
+        Result(float freq, String note, int midi, float cents) {
             this.freq = freq;
             this.note = note;
             this.midi = midi;
             this.cents = cents;
-            this.peak = peak;
         }
     }
 
@@ -56,11 +59,15 @@ final class Tuner {
             mean += m;
         }
         mean /= (N / 2 - 1);
+        // guitar band: E2 82.41 Hz up to E4's second harmonic; the lower
+        // bound leaves headroom for drop tunings
         int lo = (int) (59.0 / DF);
-        int hi = (int) (1098.0 / DF);
+        int hi = (int) (660.0 / DF);
         if (lo < 1) lo = 1;
         if (hi >= N / 2) hi = N / 2 - 1;
-        // noise gate: peak must stand out 4x above the band mean
+        // noise gate: a plucked note stands well above the band's own mean
+        // (4x); the absolute floor stops the ratio test alone from passing
+        // spurious peaks on near-silence
         float peak = 0f;
         int pi = lo;
         for (int i = lo; i <= hi; i++) {
@@ -86,7 +93,7 @@ final class Tuner {
             }
         }
         double f = (pi + delta) * DF;
-        if (f < 55 || f > 1100) {
+        if (f < 55 || f > 680) {
             return null;
         }
         int midi = (int) Math.round(12 * Math.log(f / 440.0) / Math.log(2)) + 69;
@@ -94,7 +101,6 @@ final class Tuner {
         if (midi > 127) midi = 127;
         double ref = 440.0 * Math.pow(2, (midi - 69) / 12.0);
         float cents = (float) (1200 * Math.log(f / ref) / Math.log(2));
-        return new Result((float) f, NAMES[midi % 12], midi, cents,
-                (float) Math.log(peak + 1));
+        return new Result((float) f, NAMES[midi % 12], midi, cents);
     }
 }

@@ -13,14 +13,18 @@ import android.view.WindowManager;
 /** Guitar tuner: 16 kHz mono PCM16 mic (validated in MIC-FINDINGS.md — the
  *  only rate the watch dmic clocks correctly), 4096-sample Hann-windowed FFT
  *  windows with 50% overlap, pitch -> note + cents, round gauge UI; vibrates
- *  when in tune. */
+ *  when in tune. The last detected note is held briefly when the gate drops
+ *  so the display does not flicker while the string decays. */
 public class MainActivity extends Activity {
     static final String TAG = "Tuner";
     static final int FS = 16000;
     static final int CHUNK = Tuner.N / 2; // 50% overlap: 2048-sample hop
+    /** Gate-drop display hold: keep the last note on screen briefly. */
+    static final long HOLD_MS = 300;
 
     private TunerView view;
     private Tuner tuner;
+    private Vibrator vibrator;
     private volatile boolean running = true;
     private Thread worker;
 
@@ -28,9 +32,9 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO);
         view = new TunerView(this);
         tuner = new Tuner();
+        vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
         setContentView(view);
         worker = new Thread(new Runnable() {
             @Override
@@ -42,6 +46,7 @@ public class MainActivity extends Activity {
     }
 
     void capture() {
+        // the worker thread sets its own priority; the UI thread is untouched
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO);
         // AudioRecord config validated by mic-probe (MIC-FINDINGS.md):
         // 16000 Hz is the only rate captured at its true clock on this watch.
@@ -52,19 +57,23 @@ public class MainActivity extends Activity {
                 Math.max(min, Tuner.N * 2));
         if (ar.getState() != AudioRecord.STATE_INITIALIZED) {
             Log.e(TAG, "AudioRecord init failed");
+            view.setError("mic init failed");
             return;
         }
         short[] window = new short[Tuner.N];
         short[] chunk = new short[CHUNK];
         int filled = 0;
         int peak = 0;
+        Tuner.Result held = null;
+        long heldUntil = 0;
         ar.startRecording();
         while (running) {
             int r = ar.read(chunk, 0, CHUNK);
             if (r <= 0) {
                 continue;
             }
-            // level meter from this chunk
+            // level meter from this chunk: saturates at ~55% of int16 full
+            // scale so a normal pluck moves most of the bar
             int pk = 0;
             for (int i = 0; i < r; i++) {
                 int v = chunk[i] < 0 ? -chunk[i] : chunk[i];
@@ -80,17 +89,20 @@ public class MainActivity extends Activity {
                 continue;
             }
             Tuner.Result res = tuner.analyze(window);
+            if (res != null) {
+                held = res;
+                heldUntil = System.currentTimeMillis() + HOLD_MS;
+            } else if (held != null && System.currentTimeMillis() < heldUntil) {
+                res = held; // suppress flicker while the string decays
+            }
             if (res == null) {
                 view.setIdle(level);
                 continue;
             }
             boolean inTune = Math.abs(res.cents) < 3;
             view.setResult(res.note, res.midi, res.cents, res.freq, inTune, level);
-            if (inTune) {
-                Vibrator v = (Vibrator) getSystemService(VIBRATOR_SERVICE);
-                if (v != null) {
-                    v.vibrate(15);
-                }
+            if (inTune && vibrator != null) {
+                vibrator.vibrate(15);
             }
         }
         ar.stop();

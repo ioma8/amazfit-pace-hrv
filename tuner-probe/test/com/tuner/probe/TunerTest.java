@@ -2,7 +2,9 @@ package com.tuner.probe;
 
 import java.util.Random;
 
-/** Host-side validation of the pitch detector against synthesized tones. */
+/** Host-side validation of the pitch detector against synthesized tones:
+ *  all six guitar strings, sharp notes, detuning, harmonics, quiet signals,
+ *  band-edge behavior, and noise rejection. */
 public class TunerTest {
     static int failures = 0;
 
@@ -33,11 +35,25 @@ public class TunerTest {
         check("B3 246.94 Hz", expect(t, sine(246.94, 1.0, 5), "B", 246.94, 0, 3));
         check("E4 329.63 Hz", expect(t, sine(329.63, 1.0, 6), "E", 329.63, 0, 3));
 
+        // sharp notes exercise the NAMES mapping
+        check("C#4 277.18 Hz", expect(t, sine(277.18, 1.0, 12), "C#", 277.18, 0, 3));
+        check("A#2 116.54 Hz", expect(t, sine(116.54, 1.0, 13), "A#", 116.54, 0, 3));
+
         // A4 concert pitch and detuning (exact frequencies: f = 440*2^(c/1200))
         check("A4 440.00 Hz", expect(t, sine(440.00, 0.7, 7), "A", 440.00, 0, 2));
         check("A4 +20 cents (445.12)", expect(t, sine(445.12, 0.7, 8), "A", 445.12, 20, 3));
         check("A4 -25 cents (433.66)", expect(t, sine(433.66, 0.7, 9), "A", 433.66, -25, 3));
         check("A3 +4 cents (220.51)", expect(t, sine(220.51, 0.7, 10), "A", 220.51, 4, 2));
+
+        // a quietly plucked string must still pass the noise gate
+        check("quiet A4 (2% amplitude)", expect(t, sine(440.00, 0.02, 14), "A", 440.00, 0, 3));
+
+        // upper band interior: C5, a fifth above the top string
+        check("C5 523.25 Hz", expect(t, sine(523.25, 1.0, 15), "C", 523.25, 0, 3));
+
+        // out-of-band tone (above the 660 Hz ceiling) must be rejected
+        Tuner.Result outOfBand = t.analyze(sine(800.00, 1.0, 16));
+        check("800 Hz out of band rejected (null)", outOfBand == null);
 
         // half-string harmonics shouldn't confuse: strong 2nd harmonic
         short[] harmonic = new short[Tuner.N];
