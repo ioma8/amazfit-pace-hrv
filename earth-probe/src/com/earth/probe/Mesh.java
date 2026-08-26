@@ -8,7 +8,7 @@ package com.earth.probe;
  * Winding is inward (engine cull convention: cross*centroid < 0 kept).
  */
 final class Mesh {
-    static final float R = 85f;
+    static final float R = 72f;
     static final int LON = 64;
     static final int LAT = 32;
 
