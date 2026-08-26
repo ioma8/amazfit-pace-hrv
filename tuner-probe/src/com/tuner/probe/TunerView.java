@@ -14,8 +14,8 @@ import android.view.View;
  */
 public class TunerView extends View {
     private static final int CX = 160;
-    private static final int CY = 158; // dial center, slightly below screen center
-    private static final float DIAL_R = 95f;
+    private static final int CY = 160; // true circle center (r=160, bottom flat-cut)
+    private static final float DIAL_R = 152f;
 
     private final Paint bg = new Paint();
     private final Paint dial = new Paint();
@@ -63,26 +63,26 @@ public class TunerView extends View {
         tick.setStrokeWidth(2f);
         tickLabel.setColor(gray);
         tickLabel.setTextAlign(Paint.Align.CENTER);
-        tickLabel.setTextSize(9f * d);
+        tickLabel.setTextSize(10f * d);
         needle.setColor(0xFFF5A623);
         needle.setStrokeWidth(3.5f);
         needle.setStrokeCap(Paint.Cap.ROUND);
         pivot.setColor(0xFFF5A623);
         note.setTextAlign(Paint.Align.LEFT);
-        note.setTextSize(52f * d);
+        note.setTextSize(88f * d);
         octave.setTextAlign(Paint.Align.LEFT);
-        octave.setTextSize(17f * d);
+        octave.setTextSize(24f * d);
         octave.setColor(gray);
         freqText.setTextAlign(Paint.Align.CENTER);
-        freqText.setTextSize(11f * d);
+        freqText.setTextSize(13f * d);
         freqText.setColor(gray);
         status.setTextAlign(Paint.Align.CENTER);
-        status.setTextSize(13f * d);
+        status.setTextSize(14f * d);
         status.setColor(gray);
         levelBg.setColor(0xFF16222E);
         levelFill.setColor(0xFF4E8A3E);
         neck.setTextAlign(Paint.Align.CENTER);
-        neck.setTextSize(8f * d);
+        neck.setTextSize(9f * d);
         neck.setColor(0xFF55606A);
         dialRect.set(CX - DIAL_R, CY - DIAL_R, CX + DIAL_R, CY + DIAL_R);
     }
@@ -161,39 +161,37 @@ public class TunerView extends View {
         float octW = octaveNum >= 0 ? octave.measureText(Integer.toString(octaveNum)) : 0f;
         float blockW = noteW + octW;
         float startX = CX - blockW / 2f;
-        float noteY = 118f;
+        float noteY = 132f;
         cv.drawText(ns, startX, noteY, note);
         if (octaveNum >= 0) {
-            cv.drawText(Integer.toString(octaveNum), startX + noteW, noteY - 14f,
+            cv.drawText(Integer.toString(octaveNum), startX + noteW, noteY - 18f,
                     octave);
         }
 
         // frequency readout
         if (hasPitch) {
-            cv.drawText(String.format("%.1f Hz", freq), CX, noteY + 24f, freqText);
+            cv.drawText(String.format("%.1f Hz", freq), CX, noteY + 30f, freqText);
         }
 
-        // status line (or hard error)
+        // status line (or hard error); idle shows nothing here, the "--"
+        // note already signals "no pitch"
         status.setColor(inTune ? green : gray);
         if (error != null) {
             status.setColor(0xFFC76B5E);
-            cv.drawText(error, CX, noteY + 52f, status);
-        } else if (!hasPitch) {
-            cv.drawText("pluck a string", CX, noteY + 52f, status);
-        } else if (inTune) {
-            cv.drawText("in tune", CX, noteY + 52f, status);
-        } else {
-            cv.drawText(String.format("%+.1f cents", cents), CX, noteY + 52f, status);
+            cv.drawText(error, CX, noteY + 60f, status);
+        } else if (hasPitch) {
+            cv.drawText(inTune ? "in tune" : String.format("%+.1f cents", cents),
+                    CX, noteY + 60f, status);
         }
 
         // input level bar
-        float barY = noteY + 78f;
+        float barY = noteY + 86f;
         float barW = 110f;
         cv.drawRect(CX - barW / 2, barY, CX + barW / 2, barY + 4f, levelBg);
         cv.drawRect(CX - barW / 2, barY, CX - barW / 2 + barW * level, barY + 4f,
                 levelFill);
 
         // neck diagram hint
-        cv.drawText("E A D G B E", CX, noteY + 100f, neck);
+        cv.drawText("E A D G B E", CX, noteY + 108f, neck);
     }
 }
