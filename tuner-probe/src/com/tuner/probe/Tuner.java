@@ -2,20 +2,25 @@ package com.tuner.probe;
 
 /**
  * Pitch detection for a guitar tuner: Hann window, 4096-point FFT at 16 kHz
- * (3.906 Hz bins), peak search 59..660 Hz with parabolic interpolation on
- * log-magnitudes (~0.1 bin accuracy -> ~0.4 Hz), nearest-semitone mapping to
- * note name + cents offset. Pure java.*, host-testable.
+ * (3.906 Hz bins), peak search 55..660 Hz, a sub-harmonic walk to the true
+ * fundamental, parabolic interpolation on log-magnitudes (~0.1 bin accuracy
+ * -> ~0.4 Hz), nearest-semitone mapping to note name + cents. Pure java.*,
+ * host-testable.
  *
- * The strongest spectral bin is not always the fundamental — a bright pluck
- * can put the 2nd/3rd harmonic above the fundamental. A sub-harmonic walk
- * descends from the strongest bin to the fundamental (energy at f/d must be
- * a real component of the peak), so the note name and octave stay correct;
- * a pure sine has no sub-harmonic energy, so its peak is left untouched.
+ * The strongest spectral bin is not always the fundamental — a real plucked
+ * low string can have a 2nd/3rd harmonic several times louder than its
+ * fundamental. The walk descends from the strongest bin to the fundamental
+ * only when a sub-harmonic carries a real share of the peak's energy
+ * (>= 15%): that keeps a weak-but-present fundamental (the low E's is ~22% of
+ * its 3rd harmonic) while leaving a pure sine untouched, since a pure sine
+ * has no sub-harmonic energy and the walk never ascends.
  */
 final class Tuner {
     static final int N = 4096;
     static final int FS = 16000;
     static final double DF = FS / (double) N; // 3.90625 Hz per bin
+    static final float F_LO = 55f;    // below E2 (82.41) for drop tunings
+    static final float F_HI = 660f;   // E4's 2nd harmonic ceiling
     static final String[] NAMES = {"C", "C#", "D", "D#", "E", "F", "F#",
             "G", "G#", "A", "A#", "B"};
 
@@ -54,38 +59,33 @@ final class Tuner {
         Fft.fft(re, im);
         // raw magnitudes + gate statistics
         float mean = 0f;
+        float peak = 0f;
+        int pi = 0;
+        int fLo = (int) (F_LO / DF);
+        int fHi = (int) (F_HI / DF);
+        int walkLo = fLo;
+        if (fLo < 1) fLo = 1;
+        if (fHi >= N / 2) fHi = N / 2 - 1;
         for (int i = 1; i < N / 2; i++) {
             float m = (float) Math.sqrt(re[i] * re[i] + im[i] * im[i]);
             mag[i] = m;
             mean += m;
-        }
-        mean /= (N / 2 - 1);
-        // guitar band: E2 82.41 Hz up to E4's second harmonic; the lower
-        // bound leaves headroom for drop tunings
-        int lo = (int) (59.0 / DF);
-        int hi = (int) (660.0 / DF);
-        int walkLo = (int) (55.0 / DF);
-        if (lo < 1) lo = 1;
-        if (hi >= N / 2) hi = N / 2 - 1;
-        // noise gate: a plucked note stands well above the band's own mean
-        // (4x); the absolute floor stops the ratio test alone from passing
-        // spurious peaks on near-silence
-        float peak = 0f;
-        int pi = lo;
-        for (int i = lo; i <= hi; i++) {
-            if (mag[i] > peak) {
-                peak = mag[i];
+            if (i >= fLo && i <= fHi && m > peak) {
+                peak = m;
                 pi = i;
             }
         }
+        mean /= (N / 2 - 1);
+        // noise gate: a plucked note stands well above the band's own mean
+        // (4x); the absolute floor stops the ratio test alone from passing
+        // spurious peaks on near-silence
         if (peak < 4 * mean || peak < 20f) {
             return null;
         }
-        // sub-harmonic walk: if the strongest bin is really the 2nd/3rd/...
-        // harmonic of a lower fundamental, descend to that fundamental so the
-        // note name and octave are correct. The walk only triggers when the
-        // sub-harmonic carries a real share of the peak's energy (>= 30%),
-        // which a pure sine never does.
+        // sub-harmonic walk: descend from the strongest bin while a lower
+        // integer sub-harmonic carries >= 15% of the current bin's energy.
+        // This lands on the fundamental when a harmonic dominates, but a
+        // pure sine's peak (no sub-harmonic energy) is left where it is.
         int bin = pi;
         boolean descended;
         do {
@@ -95,7 +95,7 @@ final class Tuner {
                 if (sub < walkLo) {
                     break;
                 }
-                if (mag[sub] > 0.3f * mag[bin]) {
+                if (mag[sub] > 0.15f * mag[bin]) {
                     bin = sub;
                     descended = true;
                     break;
@@ -108,7 +108,7 @@ final class Tuner {
         }
         // parabolic interpolation on log-magnitude for sub-bin accuracy
         double delta = 0;
-        if (bin > walkLo && bin < hi) {
+        if (bin > walkLo && bin < fHi) {
             double a = mag[bin - 1];
             double b = mag[bin];
             double c = mag[bin + 1];
@@ -120,7 +120,7 @@ final class Tuner {
             }
         }
         double f = (bin + delta) * DF;
-        if (f < 55 || f > 680) {
+        if (f < F_LO || f > F_HI + 20) {
             return null;
         }
         int midi = (int) Math.round(12 * Math.log(f / 440.0) / Math.log(2)) + 69;
