@@ -27,7 +27,8 @@ package com.tuner.probe;
  * Pure Java: host-testable without Android.
  */
 final class PitchTracker {
-    static final int LOCK_FRAMES = 2;
+    static final int LOCK_FRAMES = 3;   // fresh lock from idle
+    static final int CHANGE_FRAMES = 4; // different pitch class while showing
     static final long HOLD_MS = 800;
     static final long ATTACK_MS = 1500;
     private static final int MED_N = 3;
@@ -98,7 +99,12 @@ final class PitchTracker {
         candCents = res.cents;
         candFreq = res.freq;
         candCount++;
-        if (candCount >= LOCK_FRAMES) {
+        // A lone resonance (e.g. the ~208 Hz body/mic ring) can dominate a
+        // few frames with no harmonic relation to the string: demand more
+        // persistence for a pitch-class change than for the first lock.
+        int need = (note == null || note.equals(candNote))
+                ? LOCK_FRAMES : CHANGE_FRAMES;
+        if (candCount >= need) {
             if (note == null || !note.equals(candNote)) {
                 // fresh lock: adopt note + octave, restart the smoother
                 note = candNote;

@@ -110,7 +110,10 @@ public class TrackerTest {
         check("single A4 frame does not lock", !tr.isActive(now - 1));
         tr.update(fakeResult("A", 3f), now);
         now += 128;
-        check("two A4 frames lock", tr.isActive(now - 1) && "A".equals(tr.note()));
+        check("two A4 frames do not lock", !tr.isActive(now - 1));
+        tr.update(fakeResult("A", 3f), now);
+        now += 128;
+        check("three A4 frames lock", tr.isActive(now - 1) && "A".equals(tr.note()));
         for (int i = 0; i < 8; i++) {
             tr.update(fakeResult("A", 3f), now);
             now += 128;
@@ -132,6 +135,36 @@ public class TrackerTest {
         now += 128;
         check("single-frame outlier does not switch note",
                 before != null && before.equals(tr.note()));
+
+        // ---- synthetic: brief G#3 resonance flick during sustain ----
+        tr = new PitchTracker();
+        now = t0;
+        for (int i = 0; i < 16; i++) {
+            tr.update(fakeResult("A", 0f), now);
+            now += 128;
+        }
+        String stable = tr.note();
+        for (int i = 0; i < 3; i++) {
+            tr.update(fakeResult("G#", 0f, 3), now); // 3-frame G#3 flash
+            now += 128;
+        }
+        tr.update(fakeResult("A", 1f), now);
+        now += 128;
+        check("brief G#3 flash does not switch note",
+                stable != null && stable.equals(tr.note()));
+        // re-match A so the display is active, then a sustained F note must
+        // switch (the display hold must not expire mid-candidate)
+        for (int i = 0; i < 3; i++) {
+            tr.update(fakeResult("A", 1f), now);
+            now += 128;
+        }
+        check("A re-locks after flash", "A".equals(tr.note()));
+        for (int i = 0; i < 4; i++) {
+            tr.update(fakeResult("F", 0f, 3), now);
+            now += 128;
+        }
+        check("sustained different note switches",
+                "F".equals(tr.note()));
 
         // ---- synthetic: persistent octave flip is adopted ----
         tr = new PitchTracker();
