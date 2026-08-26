@@ -7,120 +7,184 @@ import android.graphics.RectF;
 import android.view.View;
 
 /**
- * Round tuner UI: big note letter in the center, a semicircular cents gauge
- * (-50..+50) with a needle, frequency readout, and a "pluck a string" hint
- * when no pitch is detected. Pure Canvas; the audio thread calls setResult()
- * and invalidates.
+ * Round tuner UI: a circular cents dial (-50..+50) around a large note letter
+ * with a superscript octave, a needle, a frequency readout, an input-level
+ * bar, and a "pluck a string" idle hint. Pure Canvas; the audio thread calls
+ * setResult()/setIdle() and invalidates.
  */
 public class TunerView extends View {
     private static final int CX = 160;
-    private static final int CY = 150;
+    private static final int CY = 158; // dial center, slightly below screen center
+    private static final float DIAL_R = 95f;
 
     private final Paint bg = new Paint();
-    private final Paint ring = new Paint();
-    private final Paint arc = new Paint();
-    private final Paint arcGood = new Paint();
+    private final Paint dial = new Paint();
+    private final Paint dialGood = new Paint();
     private final Paint tick = new Paint();
     private final Paint needle = new Paint();
+    private final Paint pivot = new Paint();
     private final Paint note = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint small = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint tiny = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final RectF gaugeRect = new RectF();
+    private final Paint octave = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint freqText = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint status = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint levelBg = new Paint();
+    private final Paint levelFill = new Paint();
+    private final Paint neck = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final RectF dialRect = new RectF();
+
+    private final int green;
+    private final int gray;
+    private final int light;
 
     private volatile String noteName = "--";
+    private volatile int octaveNum = -1;
     private volatile float cents = 0f;
     private volatile float freq = 0f;
-    private volatile boolean hasPitch = false;
     private volatile boolean inTune = false;
+    private volatile boolean hasPitch = false;
     private volatile float level = 0f; // 0..1 input level
 
     public TunerView(Context c) {
         super(c);
+        float d = c.getResources().getDisplayMetrics().density;
+        green = 0xFF3FA34D;
+        gray = 0xFF8A97A3;
+        light = 0xFFE8ECEF;
         bg.setColor(0xFF070B10);
-        ring.setColor(0xFF16222E);
-        ring.setStyle(Paint.Style.STROKE);
-        ring.setStrokeWidth(2f);
-        arc.setColor(0xFF2A3B4C);
-        arc.setStyle(Paint.Style.STROKE);
-        arc.setStrokeWidth(3f);
-        arcGood.setColor(0xFF4E8A3E);
-        arcGood.setStyle(Paint.Style.STROKE);
-        arcGood.setStrokeWidth(3f);
+        dial.setColor(0xFF22303E);
+        dial.setStyle(Paint.Style.STROKE);
+        dial.setStrokeWidth(3f);
+        dialGood.setColor(green);
+        dialGood.setStyle(Paint.Style.STROKE);
+        dialGood.setStrokeWidth(6f);
         tick.setColor(0xFF3A5064);
         tick.setStrokeWidth(2f);
         needle.setColor(0xFFF5A623);
-        needle.setStrokeWidth(3f);
+        needle.setStrokeWidth(3.5f);
         needle.setStrokeCap(Paint.Cap.ROUND);
-        note.setColor(0xFFE8ECEF);
-        note.setTextAlign(Paint.Align.CENTER);
-        note.setTextSize(64f * c.getResources().getDisplayMetrics().density);
-        small.setColor(0xFF8A97A3);
-        small.setTextAlign(Paint.Align.CENTER);
-        small.setTextSize(13f * c.getResources().getDisplayMetrics().density);
-        tiny.setColor(0xFF8A97A3);
-        tiny.setTextAlign(Paint.Align.CENTER);
-        tiny.setTextSize(9f * c.getResources().getDisplayMetrics().density);
-        gaugeRect.set(CX - 92, CY - 62, CX + 92, CY + 62);
+        pivot.setColor(0xFFF5A623);
+        note.setTextAlign(Paint.Align.LEFT);
+        note.setTextSize(52f * d);
+        octave.setTextAlign(Paint.Align.LEFT);
+        octave.setTextSize(17f * d);
+        octave.setColor(gray);
+        freqText.setTextAlign(Paint.Align.CENTER);
+        freqText.setTextSize(11f * d);
+        freqText.setColor(gray);
+        status.setTextAlign(Paint.Align.CENTER);
+        status.setTextSize(13f * d);
+        status.setColor(gray);
+        levelBg.setColor(0xFF16222E);
+        levelFill.setColor(0xFF4E8A3E);
+        neck.setTextAlign(Paint.Align.CENTER);
+        neck.setTextSize(8f * d);
+        neck.setColor(0xFF55606A);
+        dialRect.set(CX - DIAL_R, CY - DIAL_R, CX + DIAL_R, CY + DIAL_R);
     }
 
-    void setResult(String note, float cents, float freq, boolean inTune, float level) {
-        this.noteName = note;
+    void setResult(String note, int midi, float cents, float freq,
+            boolean inTune, float level) {
+        this.noteName = note.replace('#', '\u266F'); // ♯
+        this.octaveNum = midi / 12 - 1;
         this.cents = cents;
         this.freq = freq;
         this.inTune = inTune;
+        this.hasPitch = true;
         this.level = level;
         postInvalidate();
     }
 
     void setIdle(float level) {
         this.noteName = "--";
-        this.freq = 0;
+        this.octaveNum = -1;
+        this.freq = 0f;
         this.inTune = false;
+        this.hasPitch = false;
         this.level = level;
         postInvalidate();
+    }
+
+    private static float ang(float cents) {
+        return 270f + cents * 2.4f; // -50 -> 150deg, 0 -> up, +50 -> 30deg
+    }
+
+    private static float rad(float deg) {
+        return deg * (float) Math.PI / 180f;
     }
 
     @Override
     protected void onDraw(Canvas cv) {
         cv.drawColor(bg.getColor());
-        float d = getResources().getDisplayMetrics().density;
 
-        // input level arc at the bottom of the gauge
-        cv.drawArc(gaugeRect, 180 + 40 * (1 - level), 40 * level, false, arcGood);
-
-        // cents gauge: -50..+50 semicircle
-        float sweep = 180f;
-        cv.drawArc(gaugeRect, 180f, sweep, false, arc);
-        // green in-tune zone -5..+5
-        cv.drawArc(gaugeRect, 175f, 10f, false, arcGood);
+        // circular cents dial: 240 degrees, gap at the bottom
+        cv.drawArc(dialRect, 150f, 240f, false, dial);
+        // green in-tune zone centered at 0 cents
+        cv.drawArc(dialRect, 258f, 24f, false, dialGood);
         // ticks every 10 cents
         for (int c = -50; c <= 50; c += 10) {
-            double a = Math.toRadians(180 + c + 50); // 0..180 -> -50..+50
-            float r0 = 94f;
-            float r1 = 98f;
-            cv.drawLine(CX + (float) Math.cos(a) * r0, CY + (float) Math.sin(a) * r0,
-                    CX + (float) Math.cos(a) * r1, CY + (float) Math.sin(a) * r1, tick);
+            float a = ang(c);
+            float cos = (float) Math.cos(rad(a));
+            float sin = (float) Math.sin(rad(a));
+            cv.drawLine(CX + cos * (DIAL_R - 9), CY + sin * (DIAL_R - 9),
+                    CX + cos * (DIAL_R - 3), CY + sin * (DIAL_R - 3), tick);
         }
-        // needle
-        double a = Math.toRadians(180 + cents + 50);
-        cv.drawLine(CX, CY, CX + (float) Math.cos(a) * 82f,
-                CY + (float) Math.sin(a) * 82f, needle);
+        // endpoint labels
+        tick.setTextAlign(Paint.Align.CENTER);
+        tick.setTextSize(9f * getResources().getDisplayMetrics().density);
+        tick.setColor(gray);
+        float a50 = ang(-50);
+        cv.drawText("-50", CX + (float) Math.cos(rad(a50)) * (DIAL_R - 22),
+                CY + (float) Math.sin(rad(a50)) * (DIAL_R - 22) + 3, tick);
+        a50 = ang(50);
+        cv.drawText("+50", CX + (float) Math.cos(rad(a50)) * (DIAL_R - 22),
+                CY + (float) Math.sin(rad(a50)) * (DIAL_R - 22) + 3, tick);
+        tick.setTextAlign(Paint.Align.LEFT);
 
-        // note + freq
-        cv.drawText(noteName, CX, CY + 14, note);
-        String status;
+        // needle
+        float na = ang(hasPitch ? cents : 0f);
+        float ncos = (float) Math.cos(rad(na));
+        float nsin = (float) Math.sin(rad(na));
+        cv.drawLine(CX, CY, CX + ncos * (DIAL_R - 14), CY + nsin * (DIAL_R - 14),
+                needle);
+        cv.drawCircle(CX, CY, 4f, pivot);
+
+        // note letter + superscript octave, centered as a block
+        note.setColor(inTune ? green : light);
+        String ns = hasPitch ? noteName : "--";
+        float noteW = note.measureText(ns);
+        float octW = octaveNum >= 0 ? octave.measureText(Integer.toString(octaveNum)) : 0f;
+        float blockW = noteW + octW;
+        float startX = CX - blockW / 2f;
+        float noteY = 118f;
+        cv.drawText(ns, startX, noteY, note);
+        if (octaveNum >= 0) {
+            cv.drawText(Integer.toString(octaveNum), startX + noteW, noteY - 14f,
+                    octave);
+        }
+
+        // frequency readout
+        if (hasPitch) {
+            cv.drawText(String.format("%.1f Hz", freq), CX, noteY + 24f, freqText);
+        }
+
+        // status line
+        status.setColor(inTune ? green : gray);
         if (!hasPitch) {
-            status = "pluck a string";
+            cv.drawText("pluck a string", CX, noteY + 52f, status);
         } else if (inTune) {
-            status = "in tune";
+            cv.drawText("in tune", CX, noteY + 52f, status);
         } else {
-            status = String.format("%+.1f cents", cents);
+            cv.drawText(String.format("%+.1f cents", cents), CX, noteY + 52f, status);
         }
-        cv.drawText(status, CX, CY + 52, small);
-        if (freq > 0) {
-            cv.drawText(String.format("%.1f Hz", freq), CX, CY + 76, tiny);
-        }
-        // neck diagram: string names E A D G B E
-        cv.drawText("E A D G B E", CX, CY + 102, tiny);
+
+        // input level bar
+        float barY = noteY + 78f;
+        float barW = 110f;
+        cv.drawRect(CX - barW / 2, barY, CX + barW / 2, barY + 4f, levelBg);
+        cv.drawRect(CX - barW / 2, barY, CX - barW / 2 + barW * level, barY + 4f,
+                levelFill);
+
+        // neck diagram hint
+        cv.drawText("E A D G B E", CX, noteY + 100f, neck);
     }
 }

@@ -10,9 +10,10 @@ import android.os.Vibrator;
 import android.util.Log;
 import android.view.WindowManager;
 
-/** Guitar tuner: 16 kHz mono mic (the only rate the dmic clocks), 4096-sample
- *  Hann-windowed FFT windows with 50% overlap, pitch -> note + cents, shown
- *  on a round gauge; vibrates when in tune. */
+/** Guitar tuner: 16 kHz mono PCM16 mic (validated in MIC-FINDINGS.md — the
+ *  only rate the watch dmic clocks correctly), 4096-sample Hann-windowed FFT
+ *  windows with 50% overlap, pitch -> note + cents, round gauge UI; vibrates
+ *  when in tune. */
 public class MainActivity extends Activity {
     static final String TAG = "Tuner";
     static final int FS = 16000;
@@ -42,6 +43,8 @@ public class MainActivity extends Activity {
 
     void capture() {
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO);
+        // AudioRecord config validated by mic-probe (MIC-FINDINGS.md):
+        // 16000 Hz is the only rate captured at its true clock on this watch.
         int min = AudioRecord.getMinBufferSize(FS, AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT);
         AudioRecord ar = new AudioRecord(MediaRecorder.AudioSource.MIC, FS,
@@ -82,7 +85,7 @@ public class MainActivity extends Activity {
                 continue;
             }
             boolean inTune = Math.abs(res.cents) < 3;
-            view.setResult(res.note, res.cents, res.freq, inTune, level);
+            view.setResult(res.note, res.midi, res.cents, res.freq, inTune, level);
             if (inTune) {
                 Vibrator v = (Vibrator) getSystemService(VIBRATOR_SERVICE);
                 if (v != null) {
