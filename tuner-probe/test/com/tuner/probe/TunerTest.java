@@ -55,14 +55,30 @@ public class TunerTest {
         Tuner.Result outOfBand = t.analyze(sine(800.00, 1.0, 16));
         check("800 Hz out of band rejected (null)", outOfBand == null);
 
-        // half-string harmonics shouldn't confuse: strong 2nd harmonic
+        // a strong 2nd harmonic must not change the reported note: the
+        // fundamental (110 Hz) is still what is being tuned
         short[] harmonic = new short[Tuner.N];
         for (int i = 0; i < Tuner.N; i++) {
             double v = 0.5 * Math.sin(2 * Math.PI * 110 * i / Tuner.FS)
                     + 0.9 * Math.sin(2 * Math.PI * 220 * i / Tuner.FS);
             harmonic[i] = (short) (v * 12000); // peak 1.4*12000 < 32767, no clip
         }
-        check("A3 with strong 2nd harmonic", expect(t, harmonic, "A", 220.0, 0, 3));
+        check("A2 fundamental despite strong 2nd harmonic",
+                expect(t, harmonic, "A", 110.0, 0, 3));
+
+        // a dominant 3rd harmonic (wrong note name) must still resolve to
+        // the fundamental: the reliability case the sub-harmonic walk fixes
+        short[] bright = new short[Tuner.N];
+        for (int i = 0; i < Tuner.N; i++) {
+            double time = i / (double) Tuner.FS;
+            double v = 0.4 * Math.sin(2 * Math.PI * 82.41 * time)
+                    + 0.5 * Math.sin(2 * Math.PI * 164.82 * time)
+                    + 1.0 * Math.sin(2 * Math.PI * 247.23 * time)
+                    + 0.3 * Math.sin(2 * Math.PI * 329.64 * time);
+            bright[i] = (short) (v * 12000);
+        }
+        check("E2 fundamental despite dominant 3rd harmonic",
+                expect(t, bright, "E", 82.41, 0, 3));
 
         // noise only -> no pitch
         Random r = new Random(42);

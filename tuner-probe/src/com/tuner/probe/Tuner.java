@@ -6,10 +6,11 @@ package com.tuner.probe;
  * log-magnitudes (~0.1 bin accuracy -> ~0.4 Hz), nearest-semitone mapping to
  * note name + cents offset. Pure java.*, host-testable.
  *
- * The 660 Hz ceiling covers the highest guitar fundamental (E4 329.63 Hz)
- * plus its second harmonic; excluding higher overtones keeps the detector
- * from locking onto the 3rd harmonic of the upper strings instead of the
- * fundamental.
+ * The strongest spectral bin is not always the fundamental — a bright pluck
+ * can put the 2nd/3rd harmonic above the fundamental. A sub-harmonic walk
+ * descends from the strongest bin to the fundamental (energy at f/d must be
+ * a real component of the peak), so the note name and octave stay correct;
+ * a pure sine has no sub-harmonic energy, so its peak is left untouched.
  */
 final class Tuner {
     static final int N = 4096;
@@ -51,7 +52,7 @@ final class Tuner {
         }
         java.util.Arrays.fill(im, 0f);
         Fft.fft(re, im);
-        // magnitude, log-scaled (skip DC)
+        // raw magnitudes + gate statistics
         float mean = 0f;
         for (int i = 1; i < N / 2; i++) {
             float m = (float) Math.sqrt(re[i] * re[i] + im[i] * im[i]);
@@ -63,6 +64,7 @@ final class Tuner {
         // bound leaves headroom for drop tunings
         int lo = (int) (59.0 / DF);
         int hi = (int) (660.0 / DF);
+        int walkLo = (int) (55.0 / DF);
         if (lo < 1) lo = 1;
         if (hi >= N / 2) hi = N / 2 - 1;
         // noise gate: a plucked note stands well above the band's own mean
@@ -79,12 +81,37 @@ final class Tuner {
         if (peak < 4 * mean || peak < 20f) {
             return null;
         }
+        // sub-harmonic walk: if the strongest bin is really the 2nd/3rd/...
+        // harmonic of a lower fundamental, descend to that fundamental so the
+        // note name and octave are correct. The walk only triggers when the
+        // sub-harmonic carries a real share of the peak's energy (>= 30%),
+        // which a pure sine never does.
+        int bin = pi;
+        boolean descended;
+        do {
+            descended = false;
+            for (int d = 2; d <= 5; d++) {
+                int sub = bin / d;
+                if (sub < walkLo) {
+                    break;
+                }
+                if (mag[sub] > 0.3f * mag[bin]) {
+                    bin = sub;
+                    descended = true;
+                    break;
+                }
+            }
+        } while (descended);
+        // log magnitudes for parabolic interpolation
+        for (int i = 1; i < N / 2; i++) {
+            mag[i] = (float) Math.log(mag[i] + 1e-6);
+        }
         // parabolic interpolation on log-magnitude for sub-bin accuracy
         double delta = 0;
-        if (pi > lo && pi < hi) {
-            double a = Math.log(mag[pi - 1] + 1e-6);
-            double b = Math.log(mag[pi] + 1e-6);
-            double c = Math.log(mag[pi + 1] + 1e-6);
+        if (bin > walkLo && bin < hi) {
+            double a = mag[bin - 1];
+            double b = mag[bin];
+            double c = mag[bin + 1];
             double denom = a - 2 * b + c;
             if (Math.abs(denom) > 1e-9) {
                 delta = 0.5 * (a - c) / denom;
@@ -92,7 +119,7 @@ final class Tuner {
                 if (delta < -1) delta = -1;
             }
         }
-        double f = (pi + delta) * DF;
+        double f = (bin + delta) * DF;
         if (f < 55 || f > 680) {
             return null;
         }
