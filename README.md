@@ -27,6 +27,9 @@ A subsequent live watch run remained stable at 85–87 bpm, 31–36 ms RMSSD, an
 - [`radar-probe/`](radar-probe/) — CZ radar on a map, with animation
 - [`seismo-probe/`](seismo-probe/) — accelerometer nebula seismograph (CPU fBm, 60 fps)
 - [`mic-probe/`](mic-probe/) — mic capture app with UI (record/stop, live waveform, speech DSP)
+- [`sunface-probe/`](sunface-probe/) — moon phase + sun times watch face (NOAA ephemeris, GPS location)
+- [`earth-probe/`](earth-probe/) — spinning Earth with the live day/night terminator (real sun position)
+- [`tuner-probe/`](tuner-probe/) — guitar tuner: FFT pitch detection on the 16 kHz mic, note + cents gauge
 - [`render3d-probe/`](render3d-probe/) — software 3D demo: rotating copper teapot, z-buffered rasterizer (3drend port)
 - [`wifi-serve/`](wifi-serve/) — "Pace Sync": watch WiFi AP + QR, serves mic recordings over HTTP to the phone
 - [`wifi-provision/`](wifi-provision/) — adds saved Wi-Fi networks from `/sdcard/wifi.json`
@@ -211,11 +214,83 @@ adb install -r render3d-probe/aligned.apk
 adb shell am start -n com.render3d.probe/.MainActivity
 ```
 
-Emulator (pace AVD): 60 fps at ~830 drawn tris. The real MIPS watch is
-slower; the render resolution (RenderView `RW`/`RH`) and framing
-(Mesh `TARGET_RADIUS`, Engine3d `CAM_DIST`) are the tuning knobs.
+ Emulator (pace AVD): 60 fps at ~830 drawn tris. The real MIPS watch is
+ slower; the render resolution (RenderView `RW`/`RH`) and framing
+ (Mesh `TARGET_RADIUS`, Engine3d `CAM_DIST`) are the tuning knobs.
+
+## Sun face (`sunface-probe/`)
+
+Watch face: current time/date, a 24 h dial with the daylight arc
+(sunrise→sunset) and a live sun dot, moon phase with the exact per-pixel
+terminator (rendered into a small bitmap, not an ellipse approximation), and
+the day's event line. Location comes from the last GPS fix (`geo fix` on the
+emulator); fallback is Ostrava 49.82N 18.26E, badge shows the source.
+
+Ephemeris math is `SkyMath.java` — NOAA-style declination/equation of time,
+sunrise/sunset/solar noon, elevation/azimuth, and a synodic moon model
+(epoch: new moon 2000-01-06 18:14 UTC). Validated against known eclipses
+(2024-04-08 new, 2024-03-25 full) and real Ostrava sun times; the mean-motion
+moon model drifts up to ~7 h over decades (lunar eccentricity) — invisible on
+the face. Redraws every 30 s, no render thread.
+
+```bash
+sunface-probe/build.sh
+adb install -r sunface-probe/aligned.apk
+adb shell am start -n com.sunface.probe/.MainActivity
+adb emu geo fix 18.26 49.82    # feed GPS on the emulator
+```
+
+## Spinning Earth (`earth-probe/`)
+
+The render3d engine repurposed: a UV-sphere Earth (32×16, 1,024 tris,
+radius 85) colored per triangle from a 72×36 landmask rasterized from
+Natural Earth 110 m land polygons (`tools/gen_landmask.py`, `res/raw/land.txt`):
+ocean, land, and ice only where the mask says land (Antarctica/Greenland —
+the Arctic stays water). The globe spins (0.012 rad/frame) on its fixed
+23.44° tilted axis while the day/night terminator follows the real sun —
+azimuth/elevation from `SkyMath` at the current location, rotated into camera
+space every frame, so the lit side and terminator orientation match your
+actual sky at the moment you look at it. Soft terminator (0.12 dot width),
+bluish rim glow at the silhouette, static star field outside the globe.
+
+Emulator (pace AVD): 59 fps at ~210 drawn tris with GPS lock. The host test
+(`EarthTest.java`) renders at fixed sun directions and asserts: sphere fills
+the screen, day ≈ 8× brighter than night, east/west asymmetry at sunrise,
+green land visible in an afternoon sun.
+
+```bash
+earth-probe/build.sh
+adb install -r earth-probe/aligned.apk
+adb shell am start -n com.earth.probe/.MainActivity
+adb emu geo fix 18.26 49.82
+```
+
+## Guitar tuner (`tuner-probe/`)
+
+Pitch detector on the 16 kHz mic (the only rate the dmic clocks correctly):
+4096-sample Hann window, radix-2 FFT (3.906 Hz bins), peak search
+59–1098 Hz with parabolic interpolation on log-magnitude (~0.4 Hz accuracy,
+±1 cent on synthetic tones), noise-gated (peak must stand 4× above the band
+mean). Maps to the nearest semitone — round UI: big note letter, a −50…+50
+cent gauge with a needle, green in-tune zone, frequency readout, and a
+vibration tick when within ±3 cents. Covers all six guitar strings
+(E2 82.41 Hz … E4 329.63 Hz).
+
+Host test (`TunerTest.java`) synthesizes the six strings, concert A4,
+detuned tones (+20/−25/+4 cents), a strong-2nd-harmonic case, and pure
+noise — all pass; noise is rejected. The emulator has no audio input
+(`hw.audioInput=no`), so the mic path needs the real watch.
+
+```bash
+tuner-probe/build.sh
+adb install -r tuner-probe/aligned.apk
+adb shell am start -n com.tuner.probe/.MainActivity
+```
 
 ## Wrist tools (`breathe-probe/`, `metronome-probe/`, `radar-probe/`)
+
+## Wrist tools (`breathe-probe/`, `metronome-probe/`, `radar-probe/`)
+
 
 Three minimalist utilities, same build/install flow as `weather-probe`.
 

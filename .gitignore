@@ -12,3 +12,6 @@ captures/*
 filebrowser/*.apk
 wifi-serve/*.apk
 render3d-probe/*.apk
+sunface-probe/*.apk
+earth-probe/*.apk
+tuner-probe/*.apk
