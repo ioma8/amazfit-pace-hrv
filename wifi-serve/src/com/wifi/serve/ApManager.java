@@ -72,6 +72,9 @@ public final class ApManager {
             WifiManager wm = (WifiManager) ctx.getSystemService(Context.WIFI_SERVICE);
             Method m = WifiManager.class.getMethod("setWifiApEnabled", WifiConfiguration.class, boolean.class);
             m.invoke(wm, new Object[]{null, Boolean.FALSE});
+            // Turn the radio off too: the watch normally leaves WiFi off,
+            // and the AP hand-off would otherwise let it reconnect/scan.
+            wm.setWifiEnabled(false);
         } catch (Throwable t) {
             Log.e(TAG, "AP disable failed", t);
         }
