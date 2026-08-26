@@ -14,6 +14,11 @@ package com.tuner.probe;
  * (>= 15%): that keeps a weak-but-present fundamental (the low E's is ~22% of
  * its 3rd harmonic) while leaving a pure sine untouched, since a pure sine
  * has no sub-harmonic energy and the walk never ascends.
+ *
+ * A mains hum at an exact integer sub-multiple of the note (e.g. 60 Hz hum
+ * under a 120 Hz note) is indistinguishable from a real fundamental by
+ * magnitude alone; this is inherent to magnitude-only pitch detection and not
+ * a practical concern for a guitar.
  */
 final class Tuner {
     static final int N = 4096;
@@ -102,18 +107,16 @@ final class Tuner {
                 }
             }
         } while (descended);
-        // log magnitudes for parabolic interpolation
-        for (int i = 1; i < N / 2; i++) {
-            mag[i] = (float) Math.log(mag[i] + 1e-6);
-        }
-        // parabolic interpolation on log-magnitude for sub-bin accuracy
+        // parabolic interpolation on the winning bin's log-magnitude. Only
+        // at a downward-concave peak (denom < 0); a convex point would push
+        // away from the true peak.
         double delta = 0;
         if (bin > walkLo && bin < fHi) {
-            double a = mag[bin - 1];
-            double b = mag[bin];
-            double c = mag[bin + 1];
+            double a = Math.log(mag[bin - 1] + 1e-6);
+            double b = Math.log(mag[bin] + 1e-6);
+            double c = Math.log(mag[bin + 1] + 1e-6);
             double denom = a - 2 * b + c;
-            if (Math.abs(denom) > 1e-9) {
+            if (denom < -1e-9) {
                 delta = 0.5 * (a - c) / denom;
                 if (delta > 1) delta = 1;
                 if (delta < -1) delta = -1;
@@ -124,8 +127,6 @@ final class Tuner {
             return null;
         }
         int midi = (int) Math.round(12 * Math.log(f / 440.0) / Math.log(2)) + 69;
-        if (midi < 0) midi = 0;
-        if (midi > 127) midi = 127;
         double ref = 440.0 * Math.pow(2, (midi - 69) / 12.0);
         float cents = (float) (1200 * Math.log(f / ref) / Math.log(2));
         return new Result((float) f, NAMES[midi % 12], midi, cents);

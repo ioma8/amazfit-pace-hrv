@@ -69,7 +69,7 @@ public class MainActivity extends Activity {
         }
         short[] window = new short[Tuner.N];
         short[] chunk = new short[CHUNK];
-        int filled = 0;
+        int warmed = 0; // samples accumulated, capped at N to avoid overflow
         int peak = 0;
         Tuner.Result held = null;
         long heldUntil = 0;
@@ -93,8 +93,8 @@ public class MainActivity extends Activity {
             // not leave stale samples in the window)
             System.arraycopy(window, r, window, 0, Tuner.N - r);
             System.arraycopy(chunk, 0, window, Tuner.N - r, r);
-            filled += r;
-            if (filled < Tuner.N) {
+            warmed = Math.min(warmed + r, Tuner.N);
+            if (warmed < Tuner.N) {
                 continue;
             }
             Tuner.Result res = tuner.analyze(window);
