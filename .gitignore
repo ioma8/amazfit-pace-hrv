@@ -15,3 +15,4 @@ render3d-probe/*.apk
 sunface-probe/*.apk
 earth-probe/*.apk
 tuner-probe/*.apk
+mic-clock-probe/*.apk
