@@ -32,6 +32,27 @@ The probe recorded the tone at each rate. Full-spectrum peak search:
 689.06 = 1000 × 11025/16000 and 2756.25 = 1000 × 44100/16000 exactly.
 The HAL does not resample to 11025/44100 — it re-labels the 16 kHz stream.
 
+### Precise native-clock calibration
+
+`mic-clock-probe` recorded 32 seconds of untouched `MIC`/PCM16 while the host
+played four independently generated 48 kHz tones. Three two-second windows per
+tone produced:
+
+| Source tone | Captured tone (16000 Hz label) | Inferred MIC rate |
+|---:|---:|---:|
+| 440 Hz | 439.996883 Hz | 16000.113 Hz |
+| 997 Hz | 996.993518 Hz | 16000.104 Hz |
+| 1753 Hz | 1752.988708 Hz | 16000.103 Hz |
+| 3001 Hz | 3000.982317 Hz | 16000.094 Hz |
+
+The common least-squares fit is **16000.097 Hz** (+6.1 ppm). Cross-tone
+residuals are below 0.002 cents; the clock error is only **-0.0105 cents**.
+The source WAV tones validate within 0.00001 cents. Clock drift therefore
+cannot explain tuner errors on the order of 15-20 cents.
+
+Probe output: `/sdcard/mic-clock-probe/capture.wav` (fixed 32-second raw
+capture, overwritten on each launch).
+
 ### 2. Speech capture (user talking, same run)
 
 Voice is present in all four files (60–96 % voiced frames) but intelligible only in
