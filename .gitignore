@@ -10,3 +10,5 @@ captures/*
 
 .DS_Store
 filebrowser/*.apk
+wifi-serve/*.apk
+render3d-probe/*.apk

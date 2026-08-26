@@ -24,14 +24,14 @@ A subsequent live watch run remained stable at 85–87 bpm, 31–36 ms RMSSD, an
 - [`weather-probe/`](weather-probe/) — Ostrava hourly-forecast watch app (Wi-Fi + offline cache)
 - [`breathe-probe/`](breathe-probe/) — cyclic-sighing stress exercise (validated protocol)
 - [`metronome-probe/`](metronome-probe/) — vibration metronome with BPM presets
-- [`radar-probe/`](radar-probe/) — CZ radar on a map, with animation
-- [`mic-probe/`](mic-probe/) — mic capture app with UI (record/stop, live waveform, speech DSP)
+- [`render3d-probe/`](render3d-probe/) — software 3D demo: rotating copper teapot, z-buffered rasterizer (3drend port)
+- [`wifi-serve/`](wifi-serve/) — "Pace Sync": watch WiFi AP + QR, serves mic recordings over HTTP to the phone
 - [`filebrowser/`](filebrowser/) — simple sdcard file browser app (tap folders, swipe right = back, text reader + image viewer on file tap)
 - [`pull-recordings.sh`](pull-recordings.sh) — downloads new watch recordings, clears the device
 - [`captures/raw_ppg.csv`](captures/raw_ppg.csv) — captured regression fixture
 - [`HRV-FINDINGS.md`](HRV-FINDINGS.md) — algorithms, evidence, failures, and limits
 - [`PACE-FINDINGS.md`](PACE-FINDINGS.md) — device and sensor-hub reverse engineering
-- [`MIC-FINDINGS.md`](MIC-FINDINGS.md) — mic capture findings (only 16 kHz is usable)
+- [`EMULATOR.md`](EMULATOR.md) — recreate the `pace` AVD, run it, re-run the validation playbook
 - [`SUMMARY.md`](SUMMARY.md) — concise project findings
 - [`firmware/`](firmware/) and [`firmware-tools/`](firmware-tools/) — sensor-hub research artifacts
 
@@ -176,6 +176,37 @@ Currently saved on the device: `Vodafone-8614` (netId 0), `RNT` (netId 1).
 
 Credentials extraction from macOS: AirPort passwords live in the System keychain; grant the CLI once with `sudo security set-key-partition-list -S apple-tool:,apple: -s -k "" /Library/Keychains/System.keychain`, then `security find-generic-password -w -a "<ssid>" -s AirPort` (or `/tmp/dump-wifi.sh`).
 
+## 3D render demo (`render3d-probe/`)
+
+Software 3D engine ported from [`ioma8/3drend`](https://github.com/ioma8/3drend)
+(engine3d.ts): near-plane clip, backface cull, painter sort, scanline
+rasterization with a per-pixel 1/z z-buffer. No GPU, no textures — flat
+shading from a fixed light (`shadeMesh()` formula, recomputed per frame so the
+light stays world-fixed while the model spins).
+
+The model is the classic Utah teapot (`res/raw/teapot.obj`, 2,256 tris, via
+the McNopper/OpenGL examples collection), centered and scaled at load, flat
+shaded in copper. Turntable framing: the model rotates around its own Y axis
+(0.022 rad/frame) in front of a fixed camera. Touch and drag stops the
+auto-spin and rotates the model freely — horizontal drag spins it around Y,
+vertical around X; releasing holds the model still for 2 seconds (inspection
+pause), then the auto-spin resumes from the dragged orientation (if the
+release event is ever lost — e.g. mouse released outside the emulator window
+— the spin self-heals after 8 seconds). Rendering runs on a dedicated
+`THREAD_PRIORITY_URGENT_AUDIO` thread into a half-resolution bitmap (160×150)
+upscaled with bilinear filtering — the seismo-probe pattern. Screen shows
+fps · tris · pixels; FPS is also logged every 60 frames (`logcat -s Render3D`).
+
+```bash
+render3d-probe/build.sh
+adb install -r render3d-probe/aligned.apk
+adb shell am start -n com.render3d.probe/.MainActivity
+```
+
+Emulator (pace AVD): 60 fps at ~830 drawn tris. The real MIPS watch is
+slower; the render resolution (RenderView `RW`/`RH`) and framing
+(Mesh `TARGET_RADIUS`, Engine3d `CAM_DIST`) are the tuning knobs.
+
 ## Wrist tools (`breathe-probe/`, `metronome-probe/`, `radar-probe/`)
 
 Three minimalist utilities, same build/install flow as `weather-probe`.
@@ -240,6 +271,81 @@ Each pull creates `captures/mic-probe/mic_16000_<rec-time>.wav`
 (processed) and `..._raw.wav` (unprocessed), keeping the on-device names.
 The DSP is pure Java (`SpeechProc.java`), verified bit-identical to the Python
 prototype.
+
+## Pace Sync — mic recordings to phone (`wifi-serve/`)
+
+The watch turns itself into a **WiFi access point** and serves `/sdcard/mic-probe/`
+over HTTP, so the phone can pull recordings with nothing but its browser and
+camera. Transfer flow (scan-twice, no typing, no phone-side install):
+
+1. Launch Pace Sync. The watch starts AP **`PaceSync`** (WPA2, password
+   `pace-sync`) and shows QR #1: `WIFI:T:WPA;S:PaceSync;P:pace-sync;;`.
+2. Scan QR #1 with the phone camera → connect to the network.
+3. The watch detects the phone via `/proc/net/arp` (fallback: 15 s timer, or
+   tap the screen to toggle) and shows QR #2: `http://<ap-ip>:8080`.
+4. Scan QR #2 → the phone browser opens the page: file list with sizes,
+   per-file download links, **Download all (.zip)**, and **Clear recordings**
+   (POST, scoped to `mic_16000_*.wav`, JS confirm).
+
+Details: QR encoding is vendored `zxing core 3.5.3` (`libs/`); the HTTP server
+is pure `java.net` and redirects every unknown path (captive-portal probes
+like `/generate_204` included) to `/` as a hedge. The phone has no internet
+while on the watch AP — the page is fully self-contained. On exit the app
+tears the AP down and hard-kills (repo convention).
+
+```bash
+wifi-serve/build.sh
+adb install -r wifi-serve/aligned.apk
+adb shell am start -n com.wifi.serve/.MainActivity
+```
+
+Device notes: AP mode is enabled via the hidden `WifiManager` APIs
+(`setWifiApEnabled`, gated on `CHANGE_WIFI_STATE` in AOSP) — whether the Huami
+ROM allows a non-system uid to create an AP is the one open device question;
+the app surfaces failure on screen. iOS cameras do not parse `WIFI:` QR
+payloads (third-party QR app needed). Run on the cradle — AP + screen-on
+drains the battery.
+
+Host regression tests (pure Java, no device needed):
+
+```bash
+cd wifi-serve
+javac -cp "$ANDROID_SDK_ROOT/platforms/android-36/android.jar:libs/core-3.5.3.jar" -d /tmp/ws-test \
+  src/com/wifi/serve/HttpServer.java src/com/wifi/serve/Qr.java \
+  test/com/wifi/serve/HttpServerTest.java test/com/wifi/serve/QrTest.java
+java -cp /tmp/ws-test:libs/core-3.5.3.jar com.wifi.serve.HttpServerTest
+java -cp /tmp/ws-test:libs/core-3.5.3.jar com.wifi.serve.QrTest   # expects "checks passed"
+```
+
+## Emulator validation (`pace` AVD)
+
+Full how-to (recreate from scratch, run, re-run the validation playbook):
+[`EMULATOR.md`](EMULATOR.md).
+
+An Android emulator approximating the watch for on-device testing of the watch
+apps: **API 24** (Android 7.0 — closest available to the watch's 5.1; arm64
+images start at API 24, and x86 images can't run on Apple Silicon), **320×300
+@ 238 dpi** (exact watch panel metrics), software GPU.
+
+```bash
+wifi-serve/emulate.sh --create          # one-time: install image + create AVD
+$HOME/Library/Android/sdk/emulator/emulator -avd pace -scale 2 &
+wifi-serve/emulate.sh                   # wait boot, install app, push samples, launch
+```
+
+Validated on the emulator: both QR phases render and **decode from a
+screenshot** (connect QR → `WIFI:T:WPA;S:PaceSync;P:pace-sync;;`; URL QR →
+`http://<guest-ip>:8080`); the ARP-based auto-switch to phase 2 fires when a
+client appears on the AP subnet (the emulator's slirp gateway triggers it);
+all HTTP routes work end-to-end through `adb forward` (list, exact file bytes,
+`all.zip`, `/generate_204` → 302, POST `/clear` deletes only recordings);
+BACK kills the process; AP-enable failure is surfaced on screen ("AP failed
+(ROM gate?)").
+
+Not validatable on the emulator: **real AP mode** (the emulator has no WiFi
+hardware at API 24) and the phone scan/join flow — those stay on-device tests.
+The emulator is set up watch-like: status bar and nav bar hidden (see
+`EMULATOR.md`), so apps render fullscreen 320×300.
 
 ## Important limits
 
