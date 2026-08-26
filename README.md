@@ -24,15 +24,23 @@ A subsequent live watch run remained stable at 85–87 bpm, 31–36 ms RMSSD, an
 - [`weather-probe/`](weather-probe/) — Ostrava hourly-forecast watch app (Wi-Fi + offline cache)
 - [`breathe-probe/`](breathe-probe/) — cyclic-sighing stress exercise (validated protocol)
 - [`metronome-probe/`](metronome-probe/) — vibration metronome with BPM presets
+- [`radar-probe/`](radar-probe/) — CZ radar on a map, with animation
+- [`seismo-probe/`](seismo-probe/) — accelerometer nebula seismograph (CPU fBm, 60 fps)
+- [`mic-probe/`](mic-probe/) — mic capture app with UI (record/stop, live waveform, speech DSP)
 - [`render3d-probe/`](render3d-probe/) — software 3D demo: rotating copper teapot, z-buffered rasterizer (3drend port)
 - [`wifi-serve/`](wifi-serve/) — "Pace Sync": watch WiFi AP + QR, serves mic recordings over HTTP to the phone
+- [`wifi-provision/`](wifi-provision/) — adds saved Wi-Fi networks from `/sdcard/wifi.json`
 - [`filebrowser/`](filebrowser/) — simple sdcard file browser app (tap folders, swipe right = back, text reader + image viewer on file tap)
 - [`pull-recordings.sh`](pull-recordings.sh) — downloads new watch recordings, clears the device
 - [`captures/raw_ppg.csv`](captures/raw_ppg.csv) — captured regression fixture
+- [`apks/system/`](apks/system/) — stock Amazfit Pace system APKs (odexed, RE source)
 - [`HRV-FINDINGS.md`](HRV-FINDINGS.md) — algorithms, evidence, failures, and limits
 - [`PACE-FINDINGS.md`](PACE-FINDINGS.md) — device and sensor-hub reverse engineering
+- [`MIC-FINDINGS.md`](MIC-FINDINGS.md) — mic capture findings (only 16 kHz is usable)
+- [`SEISMO-NEBULA.md`](SEISMO-NEBULA.md) — nebula seismograph design notes
 - [`EMULATOR.md`](EMULATOR.md) — recreate the `pace` AVD, run it, re-run the validation playbook
 - [`SUMMARY.md`](SUMMARY.md) — concise project findings
+- [`HYPOTHESES.csv`](HYPOTHESES.csv) — tracked hypotheses log
 - [`firmware/`](firmware/) and [`firmware-tools/`](firmware-tools/) — sensor-hub research artifacts
 
 ## Local checks
