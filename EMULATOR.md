@@ -149,8 +149,8 @@ All commands from the repository root. Expected outputs are shown.
 "$ANDROID_SDK_ROOT/platform-tools/adb" shell settings put global policy_control immersive.full=*
 
 # 1. build + install
-wifi-serve/build.sh
-"$ANDROID_SDK_ROOT/platform-tools/adb" install -r wifi-serve/aligned.apk
+make wifi-serve
+"$ANDROID_SDK_ROOT/platform-tools/adb" install -r apks/builds/wifi-serve.apk
 
 # 2. sample recordings (16 kHz mono WAVs named like the watch produces them)
 "$ANDROID_SDK_ROOT/platform-tools/adb" shell mkdir -p /sdcard/mic-probe

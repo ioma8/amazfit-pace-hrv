@@ -1,18 +1,10 @@
 **/obj/
 **/dexout/
+*/*.apk
+apks/builds/
 *.idsig
 *.mips
 *.zip
-multirate-probe/*.apk
-sport-probe/*.apk
-mic-probe/*.apk
 captures/*
 
 .DS_Store
-filebrowser/*.apk
-wifi-serve/*.apk
-render3d-probe/*.apk
-sunface-probe/*.apk
-earth-probe/*.apk
-tuner-probe/*.apk
-mic-clock-probe/*.apk

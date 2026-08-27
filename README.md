@@ -66,67 +66,41 @@ HrvAnalyzer checks passed
 HrvSamples checks passed
 ```
 
-## Build, sign, and install the watch app
+Prerequisites: JDK 8+ (`javac`, `keytool`), Android SDK platform 36, Build Tools 37.0.0, `adb`, and `zip`. Set `ANDROID_HOME` if the SDK is not under `~/Library/Android/sdk`.
 
-Prerequisites: JDK 8+ (`javac`, `jar`, `keytool`), Android SDK platform 35, Build Tools 36.0.0, `adb`, and `zip`. Set `ANDROID_SDK_ROOT` if the SDK is not under `~/Library/Android/sdk`.
-
-From the repository root:
+One Makefile builds every app in this repo; each produces a signed `<app>.apk` in `apks/builds/`.
 
 ```bash
-export ANDROID_SDK_ROOT=\"${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}\"
-BT=\"$ANDROID_SDK_ROOT/build-tools/36.0.0\"
-ANDROID_JAR=\"$ANDROID_SDK_ROOT/platforms/android-35/android.jar\"
-OUT=/tmp/pace-hrv-build
-KEYSTORE=\"$HOME/.android/debug.keystore\"
-
-rm -rf \"$OUT\"
-mkdir -p \"$OUT/classes\" \"$OUT/dex\"
-
-find hrv-probe/src -name '*.java' -print0 |
-  xargs -0 javac -source 8 -target 8 -classpath \"$ANDROID_JAR\" -d \"$OUT/classes\"
-jar cf \"$OUT/classes.jar\" -C \"$OUT/classes\" .
-\"$BT/d8\" --output \"$OUT/dex\" \"$OUT/classes.jar\"
-
-\"$BT/aapt\" package -f \
-  -M hrv-probe/AndroidManifest.xml \
-  -S hrv-probe/res \
-  -I \"$ANDROID_JAR\" \
-  -F \"$OUT/unsigned.apk\"
-zip -j \"$OUT/unsigned.apk\" \"$OUT/dex/classes.dex\"
-\"$BT/zipalign\" -f 4 \"$OUT/unsigned.apk\" \"$OUT/aligned.apk\"
+make                 # build all apps
+make hrv-probe       # build one app (any <app> dir name works)
 ```
 
 Create a local debug signing key once:
 
 ```bash
-mkdir -p \"$(dirname \"$KEYSTORE\")\"
-if [ ! -f \"$KEYSTORE\" ]; then
+KEYSTORE="$HOME/.android/debug.keystore"
+mkdir -p "$(dirname "$KEYSTORE")"
+if [ ! -f "$KEYSTORE" ]; then
   keytool -genkeypair -v \
-    -keystore \"$KEYSTORE\" -storepass android \
+    -keystore "$KEYSTORE" -storepass android \
     -alias androiddebugkey -keypass android \
     -dname 'CN=Android Debug,O=Android,C=US' \
     -keyalg RSA -validity 10000
 fi
 ```
 
-Sign and verify:
+Verify the signed APK:
 
 ```bash
-\"$BT/apksigner\" sign \
-  --ks \"$KEYSTORE\" \
-  --ks-pass pass:android \
-  --key-pass pass:android \
-  --out hrv-probe/hrv-probe.apk \
-  \"$OUT/aligned.apk\"
-\"$BT/apksigner\" verify --verbose hrv-probe/hrv-probe.apk
-\"$BT/aapt\" dump badging hrv-probe/hrv-probe.apk
+"$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose apks/builds/hrv-probe.apk
+"$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging apks/builds/hrv-probe.apk
 ```
 
 Install and launch over ADB:
 
 ```bash
 adb devices
-adb install -r hrv-probe/hrv-probe.apk
+adb install -r apks/builds/hrv-probe.apk
 adb shell am start -n com.hrv.probe/.MainActivity
 ```
 
@@ -138,28 +112,14 @@ Android 5.1 watch app: enables Wi-Fi, downloads Foreca's hourly forecast for Ost
 
 Battery behavior: Wi-Fi is on only while the app is open; `onPause()` (back, home, power) disables Wi-Fi, `finish()`es and hard-kills the process. Cache survives, so relaunch shows the last forecast while Wi-Fi reconnects.
 
-Build, sign, and install (same toolchain as HRV, `ANDROID_SDK_ROOT` set):
+Build, sign, and install:
 
 ```bash
-export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}"
-BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
-ANDROID_JAR="$ANDROID_SDK_ROOT/platforms/android-35/android.jar"
-OUT=/tmp/weather-probe-build
-KEYSTORE="$HOME/.android/debug.keystore"
-rm -rf "$OUT"; mkdir -p "$OUT/classes" "$OUT/dex"
-find weather-probe/src -name '*.java' -print0 |
-  xargs -0 javac -source 8 -target 8 -classpath "$ANDROID_JAR" -d "$OUT/classes"
-jar cf "$OUT/classes.jar" -C "$OUT/classes" .
-"$BT/d8" --lib "$ANDROID_JAR" --output "$OUT/dex" "$OUT/classes.jar"
-"$BT/aapt" package -f -M weather-probe/AndroidManifest.xml -S weather-probe/res \
-  -I "$ANDROID_JAR" -F "$OUT/unsigned.apk"
-zip -j "$OUT/unsigned.apk" "$OUT/dex/classes.dex"
-"$BT/zipalign" -f 4 "$OUT/unsigned.apk" "$OUT/aligned.apk"
-"$BT/apksigner" sign --ks "$KEYSTORE" --ks-pass pass:android --key-pass pass:android \
-  --out weather-probe/weather-probe.apk "$OUT/aligned.apk"
-adb install -r weather-probe/weather-probe.apk
+make weather-probe
+adb install -r apks/builds/weather-probe.apk
 adb shell am start -n com.weather.probe/.MainActivity
 ```
+
 
 Parser regression test (needs a real `org.json` jar, e.g. from Maven Central, because `android.jar`'s is stubbed):
 
@@ -209,8 +169,8 @@ upscaled with bilinear filtering — the seismo-probe pattern. Screen shows
 fps · tris · pixels; FPS is also logged every 60 frames (`logcat -s Render3D`).
 
 ```bash
-render3d-probe/build.sh
-adb install -r render3d-probe/aligned.apk
+make render3d-probe
+adb install -r apks/builds/render3d-probe.apk
 adb shell am start -n com.render3d.probe/.MainActivity
 ```
 
@@ -234,8 +194,8 @@ moon model drifts up to ~7 h over decades (lunar eccentricity) — invisible on
 the face. Redraws every 30 s, no render thread.
 
 ```bash
-sunface-probe/build.sh
-adb install -r sunface-probe/aligned.apk
+make sunface-probe
+adb install -r apks/builds/sunface-probe.apk
 adb shell am start -n com.sunface.probe/.MainActivity
 adb emu geo fix 18.26 49.82    # feed GPS on the emulator
 ```
@@ -260,8 +220,8 @@ test (`EarthTest.java`) checks sphere coverage, day texture preservation,
 day/night shadow contrast, and directional shadow behavior.
 
 ```bash
-earth-probe/build.sh
-adb install -r earth-probe/aligned.apk
+make earth-probe
+adb install -r apks/builds/earth-probe.apk
 adb shell am start -n com.earth.probe/.MainActivity
 adb emu geo fix 18.26 49.82
 ```
@@ -283,8 +243,8 @@ noise — all pass; noise is rejected. The emulator has no audio input
 (`hw.audioInput=no`), so the mic path needs the real watch.
 
 ```bash
-tuner-probe/build.sh
-adb install -r tuner-probe/aligned.apk
+make tuner-probe
+adb install -r apks/builds/tuner-probe.apk
 adb shell am start -n com.tuner.probe/.MainActivity
 ```
 
@@ -338,12 +298,12 @@ The watch's digital mic runs at one native rate, **16000 Hz** — the other decl
 rates (8000/11025/44100) are decimated or mislabeled (pitch-warped) and unusable.
 The mic app records at 16 kHz and applies a validated speech chain
 (HPF 120 Hz → LP 5500 Hz → AGC → noise gate → tanh limiter) so speech is loud and
-pauses are silent. Build with `mic-probe/build.sh`, install the APK, tap REC/STOP,
+pauses are silent. Build with `make mic-probe`, install the APK, tap REC/STOP,
 then pull the recordings:
 
 ```bash
-mic-probe/build.sh
-adb install -r mic-probe/aligned.apk
+make mic-probe
+adb install -r apks/builds/mic-probe.apk
 adb shell am start -n com.hrv.mic/.MainActivity   # tap REC, speak, tap STOP
 ./pull-recordings.sh                                # downloads + clears device
 ```
@@ -378,8 +338,8 @@ while on the watch AP — the page is fully self-contained. On exit the app
 tears the AP down and hard-kills (repo convention).
 
 ```bash
-wifi-serve/build.sh
-adb install -r wifi-serve/aligned.apk
+make wifi-serve
+adb install -r apks/builds/wifi-serve.apk
 adb shell am start -n com.wifi.serve/.MainActivity
 ```
 

@@ -119,7 +119,7 @@ Lifecycle: **back button or any pause (home, screen off) hard-kills the process*
 zombie. While running, the screen is held awake (`FLAG_KEEP_SCREEN_ON` +
 `SCREEN_DIM_WAKE_LOCK`); a partial wakelock covers the capture itself.
 
-Build/install: `mic-probe/build.sh`, `adb install -r mic-probe/aligned.apk`.
+Build/install: `make mic-probe`, `adb install -r apks/builds/mic-probe.apk`.
 
 ## Speech DSP chain (validated on the 16 kHz speech capture)
 
