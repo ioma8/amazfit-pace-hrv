@@ -26,7 +26,7 @@ A subsequent live watch run remained stable at 85–87 bpm, 31–36 ms RMSSD, an
 - [`metronome-probe/`](metronome-probe/) — vibration metronome with BPM presets
 - [`radar-probe/`](radar-probe/) — CZ radar on a map, with animation
 - [`seismo-probe/`](seismo-probe/) — accelerometer nebula seismograph (CPU fBm, 60 fps)
-- [`mic-probe/`](mic-probe/) — mic capture app with UI (record/stop, live waveform, speech DSP)
+- [`mic-probe/`](mic-probe/) — mic capture app with UI (record/stop, live waveform, raw 16 kHz WAV)
 - [`sunface-probe/`](sunface-probe/) — moon phase + sun times watch face (NOAA ephemeris, GPS location)
 - [`earth-probe/`](earth-probe/) — textured Earth with real-sun shadow, drag-only rotation
 - [`tuner-probe/`](tuner-probe/) — guitar tuner: FFT pitch detection on the 16 kHz mic, note + cents gauge
@@ -296,10 +296,9 @@ static layers cached. Latest still by default; tap to loop frames at 100 ms
 
 The watch's digital mic runs at one native rate, **16000 Hz** — the other declared
 rates (8000/11025/44100) are decimated or mislabeled (pitch-warped) and unusable.
-The mic app records at 16 kHz and applies a validated speech chain
-(HPF 120 Hz → LP 5500 Hz → AGC → noise gate → tanh limiter) so speech is loud and
-pauses are silent. Build with `make mic-probe`, install the APK, tap REC/STOP,
-then pull the recordings:
+The mic app records raw 16 kHz mono PCM (no DSP) to the watch, until STOP.
+Build with `make mic-probe`, install the APK, tap REC/STOP, then pull the
+recordings:
 
 ```bash
 make mic-probe
@@ -312,9 +311,7 @@ Back/home exits the app completely (hard kill), and the screen stays awake while
 it runs.
 
 Each pull creates `captures/mic-probe/mic_16000_<rec-time>.wav`
-(processed) and `..._raw.wav` (unprocessed), keeping the on-device names.
-The DSP is pure Java (`SpeechProc.java`), verified bit-identical to the Python
-prototype.
+— raw capture, keeping the on-device name.
 
 ## Pace Sync — mic recordings to phone (`wifi-serve/`)
 

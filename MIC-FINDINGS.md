@@ -97,22 +97,20 @@ the full spectrum for dominant peaks when validating sample-rate clocks.**
 ## Capture app with UI (`com.hrv.mic`)
 
 Replaces the headless probe. Round-screen UI (320×300): live waveform, mm:ss
-duration, REC/STOP buttons, save status. Records at 16000 Hz (max 60 s), writes
-two files per capture to `/sdcard/mic-probe/`:
+duration, REC/STOP buttons, save status. Records at 16000 Hz (until STOP) and writes one raw WAV per capture to `/sdcard/mic-probe/`:
 
 ```text
-mic_16000_<yyyyMMdd_HHmmss_SSS>.wav       processed (loud, denoised)
 mic_16000_<yyyyMMdd_HHmmss_SSS>_raw.wav   untouched capture
 ```
 
 The timestamp is taken at **recording start**; millisecond precision keeps rapid
-successive recordings in separate files (each REC/STOP cycle creates a new pair).
+successive recordings in separate files (each REC/STOP cycle creates a new file).
 
 Source split:
 
 - `MainActivity.java` — lifecycle, AudioRecord loop, save orchestration
 - `MicView.java` — round-screen rendering + touch (unit-scaled like HrvView)
-- `SpeechProc.java` — pure-Java DSP, no Android deps, offline self-test `main()`
+- `WavWriter.java` — 16 kHz mono PCM16 WAV writer
 
 Lifecycle: **back button or any pause (home, screen off) hard-kills the process**
 (`finish()` + `Process.killProcess`) — the probe never lingers as a paused
@@ -122,6 +120,9 @@ zombie. While running, the screen is held awake (`FLAG_KEEP_SCREEN_ON` +
 Build/install: `make mic-probe`, `adb install -r apks/builds/mic-probe.apk`.
 
 ## Speech DSP chain (validated on the 16 kHz speech capture)
+
+> The chain below was validated in research but is **no longer shipped**: the
+> app now records raw 16 kHz only. Kept as the measured reference.
 
 | Stage | Parameters | Why |
 |---|---|---|
@@ -140,12 +141,9 @@ speech quiet), RMS normalization (same), minimum-statistics spectral subtraction
 HPF below 120 Hz (rumble not attenuated), LP at 4000 (dull sibilants).
 
 **Port verification**: `SpeechProc.java` reproduces the Python reference
-**bit-identical** (max sample diff = 0):
-
-```bash
-javac --release 8 -d /tmp/sp src/com/hrv/mic/SpeechProc.java
-java -cp /tmp/sp com.hrv.mic.SpeechProc in.wav out.wav
-```
+**bit-identical** (max sample diff = 0), verified when the file still shipped:
+`javac --release 8 -d /tmp/sp src/com/hrv/mic/SpeechProc.java`, then
+`java -cp /tmp/sp com.hrv.mic.SpeechProc in.wav out.wav`.
 
 ## Pull workflow
 

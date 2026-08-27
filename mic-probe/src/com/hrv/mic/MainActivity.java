@@ -18,12 +18,11 @@ import java.util.Date;
 
 /** One-shot mic capture with UI: REC/STOP buttons, live waveform, duration,
  *  save status. Records 16 kHz mono PCM (the only rate the dmic clocks
- *  correctly) and saves both raw and SpeechProc-processed WAVs to
+ *  correctly) and saves a raw WAV to
  *  /sdcard/mic-probe/. */
 public class MainActivity extends Activity {
     static final String TAG = "MicProbe";
     static final int FS = 16000;
-    static final int MAX_SECONDS = 60;
     static final int CHUNK = 3200; // 200 ms
 
     private MicView view;
@@ -116,7 +115,7 @@ public class MainActivity extends Activity {
         short[] chunk = new short[CHUNK];
         ar.startRecording();
         int lastSec = -1;
-        while (recording && frames < FS * MAX_SECONDS) {
+        while (recording) {
             int r = ar.read(chunk, 0, CHUNK);
             if (r <= 0) continue;
             buf.add(chunk, r);
@@ -142,13 +141,9 @@ public class MainActivity extends Activity {
         dir.mkdirs();
         try {
             File raw = new File(dir, "mic_16000_" + ts + "_raw.wav");
-            SpeechProc.writeWav(raw.getAbsolutePath(), samples, FS);
-            short[] proc = SpeechProc.process(samples, FS);
-            File out = new File(dir, "mic_16000_" + ts + ".wav");
-            SpeechProc.writeWav(out.getAbsolutePath(), proc, FS);
+            WavWriter.writeWav(raw.getAbsolutePath(), samples, FS);
             logLevel("raw", samples);
-            logLevel("proc", proc);
-            view.setStatus("Saved: " + out.getName());
+            view.setStatus("Saved: " + raw.getName());
         } catch (Exception e) {
             Log.e(TAG, "save failed", e);
             view.setStatus("Save failed");
