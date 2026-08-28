@@ -7,7 +7,9 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
 import android.os.PowerManager;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.WindowManager;
 
@@ -19,11 +21,17 @@ import java.util.Date;
 /** One-shot mic capture with UI: REC/STOP buttons, live waveform, duration,
  *  save status. Records 16 kHz mono PCM (the only rate the dmic clocks
  *  correctly) and saves a raw WAV to
- *  /sdcard/mic-probe/. */
+ *  /sdcard/mic-probe/.
+ *
+ *  While the activity is up, NotifBlocker cancels incoming notifications so
+ *  nothing can steal focus. A pause only exits the probe after KILL_GRACE_MS —
+ *  transient steals (a notification popup that slips through) resume the app;
+ *  home/back still exit it. */
 public class MainActivity extends Activity {
     static final String TAG = "MicProbe";
     static final int FS = 16000;
     static final int CHUNK = 3200; // 200 ms
+    static final long KILL_GRACE_MS = 3000;
 
     private MicView view;
     private volatile boolean recording = false;
@@ -31,6 +39,10 @@ public class MainActivity extends Activity {
     private volatile String recTs = null;
     private PowerManager.WakeLock wl;         // partial, during recording
     private PowerManager.WakeLock screenLock; // keeps screen on while app runs
+    private final Handler handler = new Handler();
+    private final Runnable killRunnable = new Runnable() {
+        @Override public void run() { killApp(); }
+    };
 
     static class ShortBuf {
         short[] d = new short[1 << 16];
@@ -59,7 +71,10 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        handler.removeCallbacks(killRunnable);
         screenLock.acquire();
+        NotifBlocker.setArmed(true);
+        view.setStatus(notifStatus());
     }
 
     @Override public void onBackPressed() {
@@ -68,12 +83,16 @@ public class MainActivity extends Activity {
 
     @Override protected void onPause() {
         super.onPause();
-        killApp();
+        // home / screen-off: kill after the grace so transient focus steals
+        // (notification popup) don't end the session; onResume cancels this.
+        handler.postDelayed(killRunnable, KILL_GRACE_MS);
     }
 
-    /** Stop everything and hard-kill the process: back button or any pause
-     *  (home, screen off) exits the probe completely, never a paused zombie. */
+    /** Stop everything and finish: back button or a pause that outlasts the
+     *  grace period (home, screen off) exits the probe. The process stays alive
+     *  so the notification listener stays bound across sessions. */
     void killApp() {
+        NotifBlocker.setArmed(false);
         recording = false;
         Thread t = worker;
         if (t != null) {
@@ -82,7 +101,34 @@ public class MainActivity extends Activity {
         if (wl != null && wl.isHeld()) wl.release();
         if (screenLock != null && screenLock.isHeld()) screenLock.release();
         finish();
-        android.os.Process.killProcess(android.os.Process.myPid());
+    }
+
+    /** "Notif block ON", or a hint when the grant is missing or the listener
+     *  is not bound (this ROM has no Settings UI for it). */
+    String notifStatus() {
+        String enabled = Settings.Secure.getString(
+                getContentResolver(), "enabled_notification_listeners");
+        boolean granted = false;
+        if (enabled != null) {
+            String pkg = getPackageName();
+            String cls = NotifBlocker.class.getName();
+            for (String cn : enabled.split(":")) {
+                String c = cn.trim();
+                if (c.equals(pkg + "/." + NotifBlocker.class.getSimpleName())
+                        || c.equals(pkg + "/" + cls)) {
+                    granted = true;
+                    break;
+                }
+            }
+        }
+        if (!granted) {
+            return "Grant: adb shell settings put secure enabled_notification_listeners "
+                    + getPackageName() + "/.NotifBlocker";
+        }
+        if (!NotifBlocker.connected) {
+            return "Grant set but listener not bound - re-run grant or reboot";
+        }
+        return "Notif block ON";
     }
 
     void startRecording() {
@@ -166,6 +212,7 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        NotifBlocker.setArmed(false);
         recording = false;
         Thread t = worker;
         if (t != null) {

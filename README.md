@@ -278,12 +278,32 @@ static layers cached. Latest still by default; tap to loop frames at 100 ms
 
 - Kill on pause: `onPause()` runs cleanup, then `finish()` +
   `Process.killProcess(Process.myPid())` — no zombie processes (weather-probe
-  additionally disables Wi-Fi).
+  additionally disables Wi-Fi). mic-probe/hrv-probe instead exit after a 3 s
+  grace (below), so transient focus steals don't kill them.
 - Screen awake while visible: `FLAG_KEEP_SCREEN_ON` on the window (no permission).
 - Vibration: this ROM throws a cosmetic `RuntimeException("Vibrator")` on a
   background thread *after* vibrating — wrap in try/catch, keep going.
 - Bitmaps: always decode with `inSampleSize` to display resolution; this watch's
   heap can't hold full-res layer stacks.
+- Pause grace (mic-probe, hrv-probe): a pause schedules exit after 3 s; if the
+  app comes back (onResume) before then the session continues. Back exits immediately; home exits after the grace.
+- Notification blocking (mic-probe, hrv-probe): while the app is in the
+  foreground a `NotificationListenerService` (`NotifBlocker`) cancels every
+  notification the system posts (phone notifications reach the watch via iWDS
+  as regular `NotificationManager` posts), so nothing pops over the probe.
+  This ROM has no "Notification access" settings UI — grant it once via adb
+  (persists across reboots):
+
+  ```bash
+  adb shell settings put secure enabled_notification_listeners \
+    com.hrv.mic/.NotifBlocker:com.hrv.probe/.NotifBlocker
+  ```
+
+  The grant persists and the probe processes stay alive between sessions, so
+  the listener stays bound; a force-stop (or reboot) drops the binding until
+  the grant is re-applied or the watch reboots. The mic app shows
+  `Notif block ON` (or a hint when the grant is missing / listener unbound)
+  in its status line; hrv-probe logs the state at start.
 
 ## Launcher compatibility gotchas
 

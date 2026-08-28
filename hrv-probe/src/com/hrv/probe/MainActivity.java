@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.PowerManager;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.WindowManager;
 
@@ -21,10 +22,19 @@ import java.util.List;
 public class MainActivity extends Activity {
     private static final String TAG = "HrvProbe";
     private static final int WIN = 1400; // ~55s window at 25.2 Hz
+    private static final long KILL_GRACE_MS = 3000;
 
     private final Object sessionLock = new Object();
     private final HrvSamples samples = new HrvSamples(WIN);
     private final PpgWaveform waveform = new PpgWaveform();
+    private final Handler handler = new Handler();
+    private final Runnable stopRunnable = new Runnable() {
+        @Override
+        public void run() {
+            stopAll();
+            if (!isFinishing()) finish();
+        }
+    };
 
     private HrvView view;
     private volatile boolean running;
@@ -54,9 +64,25 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        handler.removeCallbacks(stopRunnable);
+        NotifBlocker.setArmed(true);
+        log("notif block: " + (notifAccessGranted()
+            ? (NotifBlocker.connected ? "ON" : "granted, not bound - re-grant or reboot")
+            : "OFF (grant via README adb cmd)"));
+    }
+
+    @Override
+    public void onBackPressed() {
+        stopRunnable.run();
+    }
+
+    @Override
     protected void onPause() {
-        stopAll();
-        if (!isFinishing()) finish(); // launcher re-entry always creates a fresh session
+        // home / screen-off: stop after the grace so transient focus steals
+        // (a notification popup) don't end the session; onResume cancels this.
+        handler.postDelayed(stopRunnable, KILL_GRACE_MS);
         super.onPause();
     }
 
@@ -66,7 +92,25 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
+    private boolean notifAccessGranted() {
+        String enabled = Settings.Secure.getString(
+                getContentResolver(), "enabled_notification_listeners");
+        if (enabled == null) return false;
+        String pkg = getPackageName();
+        String cls = NotifBlocker.class.getName();
+        for (String cn : enabled.split(":")) {
+            String c = cn.trim();
+            if (c.equals(pkg + "/." + NotifBlocker.class.getSimpleName())
+                    || c.equals(pkg + "/" + cls)
+                    ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void stopAll() {
+        NotifBlocker.setArmed(false);
         running = false;
         Thread worker;
         synchronized (sessionLock) {
