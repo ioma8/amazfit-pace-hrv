@@ -4,8 +4,8 @@
 # Usage: ./pull-recordings.sh   [ADB_SERIAL=serial ./pull-recordings.sh]
 set -euo pipefail
 cd "$(dirname "$0")"
-OUT="captures/mic-probe"
-DEV="/sdcard/mic-probe"
+OUT="captures/mic"
+DEV="/sdcard/mic"
 ADB=(adb)
 [ -n "${ADB_SERIAL:-}" ] && ADB=(adb -s "$ADB_SERIAL")
 

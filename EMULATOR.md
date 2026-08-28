@@ -153,8 +153,8 @@ make wifi-serve
 "$ANDROID_SDK_ROOT/platform-tools/adb" install -r apks/builds/wifi-serve.apk
 
 # 2. sample recordings (16 kHz mono WAVs named like the watch produces them)
-"$ANDROID_SDK_ROOT/platform-tools/adb" shell mkdir -p /sdcard/mic-probe
-"$ANDROID_SDK_ROOT/platform-tools/adb" push /tmp/mic_16000_*.wav /sdcard/mic-probe/
+"$ANDROID_SDK_ROOT/platform-tools/adb" shell mkdir -p /sdcard/mic
+"$ANDROID_SDK_ROOT/platform-tools/adb" push /tmp/mic_16000_*.wav /sdcard/mic/
 
 # 3. launch
 "$ANDROID_SDK_ROOT/platform-tools/adb" shell am start -n com.wifi.serve/.MainActivity

@@ -1,413 +1,107 @@
 # Amazfit Pace HRV
 
-Rootless raw-PPG capture, HRV analysis, and sensor-hub research for the Amazfit Pace A1612.
+Rootless watch apps and sensor research for the Amazfit Pace A1612 (Android 5.1, MIPS32, 320×300 round @238 dpi). No root, no dependencies; pure Java, one Makefile, host-testable logic.
 
-The watch exposes one usable PPG sample per Android sensor event at approximately 25.2 Hz. Events arrive in five-sample transport bursts, so this project fits a uniform sample clock, uses zero-phase filtering and adaptive local-prominence peaks, validates pulse morphology, and computes artifact-gated time-domain HRV plus an LF resonance score.
+## Apps
 
-## Current result
+| App | What it is | Package |
+|---|---|---|
+| hrv | raw-PPG capture + HRV analysis (25.2 Hz, artifact-gated) | com.hrv.hrv |
+| mic | streaming 16 kHz mono WAV recorder | com.hrv.mic |
+| weather | Ostrava hourly forecast (Wi-Fi + offline cache) | com.weather |
+| tuner | guitar tuner (FFT pitch, note + cents gauge) | com.tuner |
+| sunface | sun times + moon phase watch face (GPS) | com.sunface |
+| earth | textured Earth with real-sun terminator | com.earth |
+| render3d | software 3D demo (teapot, z-buffered rasterizer) | com.render3d |
+| seismo | accelerometer nebula seismograph | com.seismo |
+| radar | CZ weather radar composite + animation | com.radar |
+| breathe | cyclic-sighing stress exercise | com.breathe |
+| metronome | vibration metronome, 30–240 BPM | com.metronome |
+| mic-clock | 32 s raw mic calibration capture | com.micclock |
+| multirate | PPG stream-rate diagnostic | com.hrv.multirate |
+| sport | sensor-hub rate diagnostic | com.hrv.sport |
+| wifi-serve | "Pace Sync": AP + QR, serves mic recordings over HTTP | com.wifi.serve |
+| wifi-provision | adds Wi-Fi networks from `/sdcard/wifi.json` | com.wifi.provision |
+| filebrowser | sdcard file browser (text/image viewer) | com.hrv.files |
 
-The included 59.7-second on-wrist fixture contains 1,507 raw samples. The calibrated analyzer finds 82 pulse peaks and produces:
+## Build & install
 
-```text
-HR       83.28 bpm
-RMSSD    42.27 ms
-SDNN     71.35 ms
-Score    64.46%
-Clean    81/81 intervals
-```
-
-A subsequent live watch run remained stable at 85–87 bpm, 31–36 ms RMSSD, and 56–62 ms SDNN.
-
-## Repository map
-
-- [`hrv-probe/`](hrv-probe/) — Android 5.1 watch application and installable APK
-- [`weather-probe/`](weather-probe/) — Ostrava hourly-forecast watch app (Wi-Fi + offline cache)
-- [`breathe-probe/`](breathe-probe/) — cyclic-sighing stress exercise (validated protocol)
-- [`metronome-probe/`](metronome-probe/) — vibration metronome with BPM presets
-- [`radar-probe/`](radar-probe/) — CZ radar on a map, with animation
-- [`seismo-probe/`](seismo-probe/) — accelerometer nebula seismograph (CPU fBm, 60 fps)
-- [`mic-probe/`](mic-probe/) — mic capture app with UI (record/stop, live waveform, raw 16 kHz WAV)
-- [`sunface-probe/`](sunface-probe/) — moon phase + sun times watch face (NOAA ephemeris, GPS location)
-- [`earth-probe/`](earth-probe/) — textured Earth with real-sun shadow, drag-only rotation
-- [`tuner-probe/`](tuner-probe/) — guitar tuner: FFT pitch detection on the 16 kHz mic, note + cents gauge
-- [`render3d-probe/`](render3d-probe/) — software 3D demo: rotating copper teapot, z-buffered rasterizer (3drend port)
-- [`wifi-serve/`](wifi-serve/) — "Pace Sync": watch WiFi AP + QR, serves mic recordings over HTTP to the phone
-- [`wifi-provision/`](wifi-provision/) — adds saved Wi-Fi networks from `/sdcard/wifi.json`
-- [`filebrowser/`](filebrowser/) — simple sdcard file browser app (tap folders, swipe right = back, text reader + image viewer on file tap)
-- [`pull-recordings.sh`](pull-recordings.sh) — downloads new watch recordings, clears the device
-- [`captures/raw_ppg.csv`](captures/raw_ppg.csv) — captured regression fixture
-- [`apks/system/`](apks/system/) — stock Amazfit Pace system APKs (odexed, RE source)
-- [`HRV-FINDINGS.md`](HRV-FINDINGS.md) — algorithms, evidence, failures, and limits
-- [`PACE-FINDINGS.md`](PACE-FINDINGS.md) — device and sensor-hub reverse engineering
-- [`MIC-FINDINGS.md`](MIC-FINDINGS.md) — mic capture findings (only 16 kHz is usable)
-- [`SEISMO-NEBULA.md`](SEISMO-NEBULA.md) — nebula seismograph design notes
-- [`EMULATOR.md`](EMULATOR.md) — recreate the `pace` AVD, run it, re-run the validation playbook
-- [`SUMMARY.md`](SUMMARY.md) — concise project findings
-- [`HYPOTHESES.csv`](HYPOTHESES.csv) — tracked hypotheses log
-- [`firmware/`](firmware/) and [`firmware-tools/`](firmware-tools/) — sensor-hub research artifacts
-
-## Local checks
+Prereqs: JDK 8+, Android SDK platform 36 + Build Tools 37.0.0, `adb`, `zip` (`ANDROID_HOME` or `~/Library/Android/sdk`). Debug keystore at `~/.android/debug.keystore` (create once with `keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -dname 'CN=Android Debug,O=Android,C=US' -keyalg RSA -validity 10000`).
 
 ```bash
-rm -rf /tmp/hrv-tests
-javac -d /tmp/hrv-tests \
-  hrv-probe/src/com/hrv/probe/HrvAnalyzer.java \
-  hrv-probe/src/com/hrv/probe/HrvSamples.java \
-  hrv-probe/test/com/hrv/probe/HrvAnalyzerTest.java \
-  hrv-probe/test/com/hrv/probe/HrvSamplesTest.java
-java -cp /tmp/hrv-tests com.hrv.probe.HrvAnalyzerTest captures/raw_ppg.csv
-java -cp /tmp/hrv-tests com.hrv.probe.HrvSamplesTest
+make                 # build all apps -> signed APKs in apks/builds/
+make hrv             # build one app (any app dir name works)
+make clean
+
+adb install -r apks/builds/hrv.apk
+adb shell am start -n com.hrv.hrv/.MainActivity
 ```
 
-Expected output:
+`apksigner verify --verbose apks/builds/<app>.apk` checks the signature. An update needs the same signing key; otherwise `adb uninstall <package>` first.
 
-```text
-HrvAnalyzer checks passed
-HrvSamples checks passed
-```
-
-Prerequisites: JDK 8+ (`javac`, `keytool`), Android SDK platform 36, Build Tools 37.0.0, `adb`, and `zip`. Set `ANDROID_HOME` if the SDK is not under `~/Library/Android/sdk`.
-
-One Makefile builds every app in this repo; each produces a signed `<app>.apk` in `apks/builds/`.
+Host tests (pure Java, no device): each app has `test/` — e.g. the HRV regression:
 
 ```bash
-make                 # build all apps
-make hrv-probe       # build one app (any <app> dir name works)
+javac -d /tmp/t hrv/src/com/hrv/hrv/HrvAnalyzer.java hrv/src/com/hrv/hrv/HrvSamples.java \
+  hrv/test/com/hrv/hrv/HrvAnalyzerTest.java hrv/test/com/hrv/hrv/HrvSamplesTest.java
+java -cp /tmp/t com.hrv.hrv.HrvAnalyzerTest captures/raw_ppg.csv   # expects "checks passed"
 ```
 
-Create a local debug signing key once:
+## Mic recordings
+
+The watch dmic clocks correctly only at **16000 Hz** (other rates are pitch-warped). `mic` records raw 16 kHz mono PCM streaming straight to `/sdcard/mic/`; back exits immediately, home after a 3 s grace.
 
 ```bash
-KEYSTORE="$HOME/.android/debug.keystore"
-mkdir -p "$(dirname "$KEYSTORE")"
-if [ ! -f "$KEYSTORE" ]; then
-  keytool -genkeypair -v \
-    -keystore "$KEYSTORE" -storepass android \
-    -alias androiddebugkey -keypass android \
-    -dname 'CN=Android Debug,O=Android,C=US' \
-    -keyalg RSA -validity 10000
-fi
+make mic && adb install -r apks/builds/mic.apk
+./pull-recordings.sh    # downloads new captures to captures/mic/, clears the device
 ```
 
-Verify the signed APK:
+## Pace Sync (`wifi-serve`)
+
+1. Launch — the watch starts AP **`PaceSync`** (WPA2, `pace-sync`) and shows QR #1.
+2. Scan with the phone → connect.
+3. Watch detects the phone (ARP) and shows QR #2: `http://<ap-ip>:8080`.
+4. Phone browser: file list, per-file download, **Download all (.zip)**, **Clear recordings**.
 
 ```bash
-"$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --verbose apks/builds/hrv-probe.apk
-"$ANDROID_HOME/build-tools/37.0.0/aapt" dump badging apks/builds/hrv-probe.apk
+make wifi-serve && adb install -r apks/builds/wifi-serve.apk
 ```
 
-Install and launch over ADB:
+iOS cameras don't parse `WIFI:` QRs (third-party QR app needed). Run on the cradle — AP + screen-on drains the battery.
 
-```bash
-adb devices
-adb install -r apks/builds/hrv-probe.apk
-adb shell am start -n com.hrv.probe/.MainActivity
-```
+## App conventions
 
-Android requires updates to use the same signing key. If another key signed the installed copy, `adb install -r` returns `INSTALL_FAILED_UPDATE_INCOMPATIBLE`; uninstall that copy first with `adb uninstall com.hrv.probe`, then install again.
-
-## Ostrava weather app (`weather-probe/`)
-
-Android 5.1 watch app: enables Wi-Fi, downloads Foreca's hourly forecast for Ostrava (today `?day=0` + tomorrow `?day=1`), parses the server-embedded `renderHourly({data:[...]})` JSON (the page is a JS shell — there are no server-rendered hour rows), caches it to app storage, and shows a vertically scrollable table: Time · Temp · Wind · Rain% · Condition, with a "Tomorrow" separator. Works offline (shows last saved forecast).
-
-Battery behavior: Wi-Fi is on only while the app is open; `onPause()` (back, home, power) disables Wi-Fi, `finish()`es and hard-kills the process. Cache survives, so relaunch shows the last forecast while Wi-Fi reconnects.
-
-Build, sign, and install:
-
-```bash
-make weather-probe
-adb install -r apks/builds/weather-probe.apk
-adb shell am start -n com.weather.probe/.MainActivity
-```
-
-
-Parser regression test (needs a real `org.json` jar, e.g. from Maven Central, because `android.jar`'s is stubbed):
-
-```bash
-javac -cp /tmp/json.jar -d /tmp/wpt weather-probe/src/com/weather/probe/*.java \
-  weather-probe/test/com/weather/probe/ForecaParserTest.java
-java -cp /tmp/json.jar:/tmp/wpt com.weather.probe.ForecaParserTest            # fixture
-java -cp /tmp/json.jar:/tmp/wpt com.weather.probe.ForecaParserTest page.html   # live page
-```
-
-## Wi-Fi provisioning (`wifi-provision/`)
-
-No root exists on the watch (uid 2000), so `wpa_supplicant.conf` is not writable — networks are added through `WifiManager.addNetwork` from a tiny app that reads `/sdcard/wifi.json`:
-
-```json
-[{"ssid":"Vodafone-8614","password":"..."},{"ssid":"RNT","password":"..."}]
-```
-
-```bash
-adb push wifi.json /sdcard/wifi.json
-adb shell am start -n com.wifi.provision/.MainActivity   # adds networks, deletes the json
-```
-
-Currently saved on the device: `Vodafone-8614` (netId 0), `RNT` (netId 1).
-
-Credentials extraction from macOS: AirPort passwords live in the System keychain; grant the CLI once with `sudo security set-key-partition-list -S apple-tool:,apple: -s -k "" /Library/Keychains/System.keychain`, then `security find-generic-password -w -a "<ssid>" -s AirPort` (or `/tmp/dump-wifi.sh`).
-
-## 3D render demo (`render3d-probe/`)
-
-Software 3D engine ported from [`ioma8/3drend`](https://github.com/ioma8/3drend)
-(engine3d.ts): near-plane clip, backface cull, painter sort, scanline
-rasterization with a per-pixel 1/z z-buffer. No GPU, no textures — flat
-shading from a fixed light (`shadeMesh()` formula, recomputed per frame so the
-light stays world-fixed while the model spins).
-
-The model is the classic Utah teapot (`res/raw/teapot.obj`, 2,256 tris, via
-the McNopper/OpenGL examples collection), centered and scaled at load, flat
-shaded in copper. Turntable framing: the model rotates around its own Y axis
-(0.022 rad/frame) in front of a fixed camera. Touch and drag stops the
-auto-spin and rotates the model freely — horizontal drag spins it around Y,
-vertical around X; releasing holds the model still for 2 seconds (inspection
-pause), then the auto-spin resumes from the dragged orientation (if the
-release event is ever lost — e.g. mouse released outside the emulator window
-— the spin self-heals after 8 seconds). Rendering runs on a dedicated
-`THREAD_PRIORITY_URGENT_AUDIO` thread into a half-resolution bitmap (160×150)
-upscaled with bilinear filtering — the seismo-probe pattern. Screen shows
-fps · tris · pixels; FPS is also logged every 60 frames (`logcat -s Render3D`).
-
-```bash
-make render3d-probe
-adb install -r apks/builds/render3d-probe.apk
-adb shell am start -n com.render3d.probe/.MainActivity
-```
-
- Emulator (pace AVD): 60 fps at ~830 drawn tris. The real MIPS watch is
- slower; the render resolution (RenderView `RW`/`RH`) and framing
- (Mesh `TARGET_RADIUS`, Engine3d `CAM_DIST`) are the tuning knobs.
-
-## Sun face (`sunface-probe/`)
-
-Watch face: current time/date, a 24 h dial with the daylight arc
-(sunrise→sunset) and a live sun dot, moon phase with the exact per-pixel
-terminator (rendered into a small bitmap, not an ellipse approximation), and
-the day's event line. Location comes from the last GPS fix (`geo fix` on the
-emulator); fallback is Ostrava 49.82N 18.26E, badge shows the source.
-
-Ephemeris math is `SkyMath.java` — NOAA-style declination/equation of time,
-sunrise/sunset/solar noon, elevation/azimuth, and a synodic moon model
-(epoch: new moon 2000-01-06 18:14 UTC). Validated against known eclipses
-(2024-04-08 new, 2024-03-25 full) and real Ostrava sun times; the mean-motion
-moon model drifts up to ~7 h over decades (lunar eccentricity) — invisible on
-the face. Redraws every 30 s, no render thread.
-
-```bash
-make sunface-probe
-adb install -r apks/builds/sunface-probe.apk
-adb shell am start -n com.sunface.probe/.MainActivity
-adb emu geo fix 18.26 49.82    # feed GPS on the emulator
-```
-
-## Textured Earth (`earth-probe/`)
-
-The render3d engine maps the supplied Blue Marble JPEG
-(`res/drawable-nodpi/earth.jpg`, `world.200407.3x5400x2700.jpg`) onto a
-64×32 UV sphere: 4,096 triangles, up from the original 1,024. Texture
-coordinates are perspective-correct and the horizontal longitude is corrected
-to match the supplied map.
-
-The texture is copied unchanged on the day side. The geocentric sun vector is
-recomputed from UTC solar declination and subsolar longitude; the night side
-receives only a black shadow overlay with a soft terminator. No diffuse light
-tint, night lights, or colored rim glow is applied. The globe is stationary
-until horizontal/vertical touch drag rotates it; it does not auto-spin, and
-the shadow remains attached to the geographic texture during the drag.
-
-Emulator (pace AVD): ~59 fps at ~846 drawn triangles with GPS lock. The host
-test (`EarthTest.java`) checks sphere coverage, day texture preservation,
-day/night shadow contrast, and directional shadow behavior.
-
-```bash
-make earth-probe
-adb install -r apks/builds/earth-probe.apk
-adb shell am start -n com.earth.probe/.MainActivity
-adb emu geo fix 18.26 49.82
-```
-
-## Guitar tuner (`tuner-probe/`)
-
-Pitch detector on the 16 kHz mic (the only rate the dmic clocks correctly):
-4096-sample Hann window, radix-2 FFT (3.906 Hz bins), peak search
-59–1098 Hz with parabolic interpolation on log-magnitude (~0.4 Hz accuracy,
-±1 cent on synthetic tones), noise-gated (peak must stand 4× above the band
-mean). Maps to the nearest semitone — round UI: big note letter, a −50…+50
-cent gauge with a needle, green in-tune zone, frequency readout, and a
-vibration tick when within ±3 cents. Covers all six guitar strings
-(E2 82.41 Hz … E4 329.63 Hz).
-
-Host test (`TunerTest.java`) synthesizes the six strings, concert A4,
-detuned tones (+20/−25/+4 cents), a strong-2nd-harmonic case, and pure
-noise — all pass; noise is rejected. The emulator has no audio input
-(`hw.audioInput=no`), so the mic path needs the real watch.
-
-```bash
-make tuner-probe
-adb install -r apks/builds/tuner-probe.apk
-adb shell am start -n com.tuner.probe/.MainActivity
-```
-
-## Wrist tools (`breathe-probe/`, `metronome-probe/`, `radar-probe/`)
-
-## Wrist tools (`breathe-probe/`, `metronome-probe/`, `radar-probe/`)
-
-
-Three minimalist utilities, same build/install flow as `weather-probe`.
-
-### Breathe — cyclic sighing
-The best-validated breathing pattern for acute stress reduction (Balban et al. 2023,
-*Cell Reports Medicine*, PMID 36630953): two nasal inhales + long slow exhale,
-~1:2 ratio. Pacer: 2s in → 2s top-up → 8s sigh out, 25 sighs (~5 min, as studied).
-No vibration. Tap to pause/resume/restart; screen stays on.
-
-### Metronome
-Vibration metronome, 30–240 BPM, preset rows (60–200), first beat of each 4/4 bar
-accented (90 ms vs 30 ms tick). `Start` toggles to `Stop`. Screen stays on.
-
-### Radar
-CZ radar composite, same layer stack as the CHMÚ page:
-`opendata.chmi.cz/.../maxz/png/` frames over `produkty.chmi.cz` terrain
-(`oro`), underlay (`und3`) and border (`hranice`) layers. Latest 24 frames
-(~2 h) are composited at 340×230 (keeps ~24 bitmaps ≈ 8 MB on the MIPS heap),
-static layers cached. Latest still by default; tap to loop frames at 100 ms
-(bourky.cz style), tap again for the still. Each frame shows its local time
-(UTC + device offset) bottom-right. Offline: last composite cached.
-
-## App conventions (all watch apps)
-
-- Kill on pause: `onPause()` runs cleanup, then `finish()` +
-  `Process.killProcess(Process.myPid())` — no zombie processes (weather-probe
-  additionally disables Wi-Fi). mic-probe/hrv-probe instead exit after a 3 s
-  grace (below), so transient focus steals don't kill them.
-- Screen awake while visible: `FLAG_KEEP_SCREEN_ON` on the window (no permission).
-- Vibration: this ROM throws a cosmetic `RuntimeException("Vibrator")` on a
-  background thread *after* vibrating — wrap in try/catch, keep going.
-- Bitmaps: always decode with `inSampleSize` to display resolution; this watch's
-  heap can't hold full-res layer stacks.
-- Pause grace (mic-probe, hrv-probe): a pause schedules exit after 3 s; if the
-  app comes back (onResume) before then the session continues. Back exits immediately; home exits after the grace.
-- Notification blocking (mic-probe, hrv-probe): while the app is in the
-  foreground a `NotificationListenerService` (`NotifBlocker`) cancels every
-  notification the system posts (phone notifications reach the watch via iWDS
-  as regular `NotificationManager` posts), so nothing pops over the probe.
-  This ROM has no "Notification access" settings UI — grant it once via adb
-  (persists across reboots):
+- **Shared core** (`common/src/com/hrv/common/`, on every app's classpath): UI activities extend `ProbeActivity` (headless diagnostics multirate/sport stay raw Activity) (screen-on, wakelock, brightness force/restore, exit behaviour); round-screen views extend `RoundView` (tuner viewport: center 160,160, r=152, density-scaled text). Pure-Java pieces — `WavWriter`, `Fft`, `SkyMath`, `Net`, `Klvp`, `MicAudio`, `Engine3d`+`Mesh` — are host-testable.
+- **Exit on pause**: `ProbeActivity.hardKillOnPause()` = cleanup → `finish()` + `Process.killProcess` (default probe behaviour); `useGraceExit()` (mic, hrv) = exit 3 s after pause unless resumed — the process stays alive so the notification listener stays bound. `onExitCleanup()` runs before finishing and must be idempotent. Neither mode = no exit-on-pause (filebrowser, mic-clock).
+- **Notification blocking** (mic, hrv): a `NotificationListenerService` (`NotifBlocker`) cancels every notification while the app is foreground — this ROM has no notification-access UI, so grant once via adb (persists across reboots; re-apply after force-stop/reboot to re-bind):
 
   ```bash
   adb shell settings put secure enabled_notification_listeners \
-    com.hrv.mic/.NotifBlocker:com.hrv.probe/.NotifBlocker
+    com.hrv.mic/.NotifBlocker:com.hrv.hrv/.NotifBlocker
   ```
 
-  The grant persists and the probe processes stay alive between sessions, so
-  the listener stays bound; a force-stop (or reboot) drops the binding until
-  the grant is re-applied or the watch reboots. The mic app shows
-  `Notif block ON` (or a hint when the grant is missing / listener unbound)
-  in its status line; hrv-probe logs the state at start.
+  `NotifBlocker` stays a per-app copy: the grant embeds the class name.
+- Screen stays on while visible (`FLAG_KEEP_SCREEN_ON`).
+- Vibration throws a cosmetic `RuntimeException` on this ROM after vibrating — wrap in try/catch.
+- Bitmaps: decode with `inSampleSize` to display resolution — the watch heap can't hold full-res stacks.
 
-## Launcher compatibility gotchas
+## Launcher gotchas
 
-- App icons must be **PNG bitmaps** — the stock launcher crashes (`VectorDrawable cannot be cast to BitmapDrawable`) on vector icons.
-- Do **not** set `android:screenOrientation` — it forces a config change that relaunches the launcher and trips its `contain 3 creator` bug.
-- `adb shell svc wifi disable` fails on this device (shell lacks `CHANGE_WIFI_STATE`); the app itself can toggle Wi-Fi.
-- `adb logcat -c` does not clear the log buffer on this watch.
+- Icons must be **PNG bitmaps** (launcher crashes on vector icons).
+- No `android:screenOrientation` (trips the launcher's `contain 3 creator` bug).
+- `adb shell svc wifi disable` fails on this device; the app itself can toggle Wi-Fi.
+- `adb logcat -c` doesn't clear the log buffer.
 
-## Mic capture (see [`MIC-FINDINGS.md`](MIC-FINDINGS.md))
+## Research docs
 
-The watch's digital mic runs at one native rate, **16000 Hz** — the other declared
-rates (8000/11025/44100) are decimated or mislabeled (pitch-warped) and unusable.
-The mic app records raw 16 kHz mono PCM (no DSP) to the watch, until STOP.
-Build with `make mic-probe`, install the APK, tap REC/STOP, then pull the
-recordings:
-
-```bash
-make mic-probe
-adb install -r apks/builds/mic-probe.apk
-adb shell am start -n com.hrv.mic/.MainActivity   # tap REC, speak, tap STOP
-./pull-recordings.sh                                # downloads + clears device
-```
-
-Back exits immediately; home exits after a 3 s grace (process stays alive so
-the notification listener stays bound). The screen stays awake while it runs.
-
-Each pull creates `captures/mic-probe/mic_16000_<rec-time>.wav`
-— raw capture, keeping the on-device name.
-
-## Pace Sync — mic recordings to phone (`wifi-serve/`)
-
-The watch turns itself into a **WiFi access point** and serves `/sdcard/mic-probe/`
-over HTTP, so the phone can pull recordings with nothing but its browser and
-camera. Transfer flow (scan-twice, no typing, no phone-side install):
-
-1. Launch Pace Sync. The watch starts AP **`PaceSync`** (WPA2, password
-   `pace-sync`) and shows QR #1: `WIFI:T:WPA;S:PaceSync;P:pace-sync;;`.
-2. Scan QR #1 with the phone camera → connect to the network.
-3. The watch detects the phone via `/proc/net/arp` (fallback: 15 s timer, or
-   tap the screen to toggle) and shows QR #2: `http://<ap-ip>:8080`.
-4. Scan QR #2 → the phone browser opens the page: file list with sizes,
-   per-file download links, **Download all (.zip)**, and **Clear recordings**
-   (POST, scoped to `mic_16000_*.wav`, JS confirm).
-
-Details: QR encoding is vendored `zxing core 3.5.3` (`libs/`); the HTTP server
-is pure `java.net` and redirects every unknown path (captive-portal probes
-like `/generate_204` included) to `/` as a hedge. The phone has no internet
-while on the watch AP — the page is fully self-contained. On exit the app
-tears the AP down and hard-kills (repo convention).
-
-```bash
-make wifi-serve
-adb install -r apks/builds/wifi-serve.apk
-adb shell am start -n com.wifi.serve/.MainActivity
-```
-
-Device notes: AP mode is enabled via the hidden `WifiManager` APIs
-(`setWifiApEnabled`, gated on `CHANGE_WIFI_STATE` in AOSP) — whether the Huami
-ROM allows a non-system uid to create an AP is the one open device question;
-the app surfaces failure on screen. iOS cameras do not parse `WIFI:` QR
-payloads (third-party QR app needed). Run on the cradle — AP + screen-on
-drains the battery.
-
-Host regression tests (pure Java, no device needed):
-
-```bash
-cd wifi-serve
-javac -cp "$ANDROID_SDK_ROOT/platforms/android-36/android.jar:libs/core-3.5.3.jar" -d /tmp/ws-test \
-  src/com/wifi/serve/HttpServer.java src/com/wifi/serve/Qr.java \
-  test/com/wifi/serve/HttpServerTest.java test/com/wifi/serve/QrTest.java
-java -cp /tmp/ws-test:libs/core-3.5.3.jar com.wifi.serve.HttpServerTest
-java -cp /tmp/ws-test:libs/core-3.5.3.jar com.wifi.serve.QrTest   # expects "checks passed"
-```
-
-## Emulator validation (`pace` AVD)
-
-Full how-to (recreate from scratch, run, re-run the validation playbook):
-[`EMULATOR.md`](EMULATOR.md).
-
-An Android emulator approximating the watch for on-device testing of the watch
-apps: **API 24** (Android 7.0 — closest available to the watch's 5.1; arm64
-images start at API 24, and x86 images can't run on Apple Silicon), **320×300
-@ 238 dpi** (exact watch panel metrics), software GPU.
-
-```bash
-wifi-serve/emulate.sh --create          # one-time: install image + create AVD
-$HOME/Library/Android/sdk/emulator/emulator -avd pace -scale 2 &
-wifi-serve/emulate.sh                   # wait boot, install app, push samples, launch
-```
-
-Validated on the emulator: both QR phases render and **decode from a
-screenshot** (connect QR → `WIFI:T:WPA;S:PaceSync;P:pace-sync;;`; URL QR →
-`http://<guest-ip>:8080`); the ARP-based auto-switch to phase 2 fires when a
-client appears on the AP subnet (the emulator's slirp gateway triggers it);
-all HTTP routes work end-to-end through `adb forward` (list, exact file bytes,
-`all.zip`, `/generate_204` → 302, POST `/clear` deletes only recordings);
-BACK kills the process; AP-enable failure is surfaced on screen ("AP failed
-(ROM gate?)").
-
-Not validatable on the emulator: **real AP mode** (the emulator has no WiFi
-hardware at API 24) and the phone scan/join flow — those stay on-device tests.
-The emulator is set up watch-like: status bar and nav bar hidden (see
-`EMULATOR.md`), so apps render fullscreen 320×300.
+- [`HRV-FINDINGS.md`](HRV-FINDINGS.md) — HRV algorithms, evidence, limits
+- [`PACE-FINDINGS.md`](PACE-FINDINGS.md) — device + sensor-hub reverse engineering
+- [`MIC-FINDINGS.md`](MIC-FINDINGS.md) — mic capture findings
+- [`SUMMARY.md`](SUMMARY.md) / [`HYPOTHESES.csv`](HYPOTHESES.csv) — findings summary + tracked hypotheses
+- [`EMULATOR.md`](EMULATOR.md) — recreate the `pace` AVD (API 24, 320×300 @238 dpi, software GPU)
+- [`SEISMO-NEBULA.md`](SEISMO-NEBULA.md) — seismo design notes
+- `captures/raw_ppg.csv` — HRV regression fixture; `apks/system/` — stock system APKs (RE source); `firmware/` + `firmware-tools/` — sensor-hub artifacts
 
 ## Important limits
 
-This is experimental wearable research, not a medical device. The calculations match the captured PPG pulse timing, but no simultaneous ECG reference was recorded. At 25 Hz, interpolation improves smooth peak timing but cannot recover information absent from the sampled waveform.
+Experimental wearable research, not a medical device. No simultaneous ECG reference was recorded; at 25 Hz, interpolation can't recover information absent from the sampled waveform.

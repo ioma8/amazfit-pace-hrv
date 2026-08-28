@@ -1,19 +1,18 @@
 package com.hrv.files;
 
-import android.app.Activity;
+import com.hrv.common.ProbeActivity;
+
 import android.os.Bundle;
-import android.view.WindowManager;
 
 import java.io.File;
 
-public class MainActivity extends Activity {
+public class MainActivity extends ProbeActivity {
     private FilesView files;
     private TextViewer reader;
     private ImageViewer image;
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         files = new FilesView(this, FilesView.pickRoot());
         files.setListener(new FilesView.Listener() {
             @Override public void onOpenFile(File f) {

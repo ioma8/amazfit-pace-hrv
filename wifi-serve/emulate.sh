@@ -39,7 +39,7 @@ until [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 
 
 cd "$(dirname "$0")"
 "$ADB" install -r wifi-serve/aligned.apk
-"$ADB" shell mkdir -p /sdcard/mic-probe
+"$ADB" shell mkdir -p /sdcard/mic
 "$ADB" shell settings put global policy_control immersive.full=*   # hide status bar
 "$ADB" shell am start -n com.wifi.serve/.MainActivity
 echo "Pace Sync running on the emulator."

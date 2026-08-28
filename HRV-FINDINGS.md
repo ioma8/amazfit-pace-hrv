@@ -4,7 +4,7 @@
 
 This document records the implemented HRV pipeline, the raw PPG evidence used to calibrate it, the failures found in earlier versions, and the current limits of the result.
 
-The implementation is under `hrv-probe/src/com/hrv/probe/`. The captured regression fixture is `captures/raw_ppg.csv`.
+The implementation is under `hrv/src/com/hrv/hrv/`. The captured regression fixture is `captures/raw_ppg.csv`.
 
 ## Sensor and Timing Facts
 
@@ -232,7 +232,7 @@ The detector accepts real 160–170 bpm pulse spacing but rejects unsupported 18
 The permanent local check is:
 
 ```text
-hrv-probe/test/com/hrv/probe/HrvAnalyzerTest.java
+hrv/test/com/hrv/hrv/HrvAnalyzerTest.java
 ```
 
 Run it with:
@@ -240,10 +240,10 @@ Run it with:
 ```bash
 rm -rf /tmp/hrv-tests
 javac -d /tmp/hrv-tests \
-  hrv-probe/src/com/hrv/probe/HrvAnalyzer.java \
-  hrv-probe/test/com/hrv/probe/HrvAnalyzerTest.java
+  hrv/src/com/hrv/hrv/HrvAnalyzer.java \
+  hrv/test/com/hrv/hrv/HrvAnalyzerTest.java
 java -cp /tmp/hrv-tests \
-  com.hrv.probe.HrvAnalyzerTest captures/raw_ppg.csv
+  com.hrv.hrv.HrvAnalyzerTest captures/raw_ppg.csv
 ```
 
 Expected output:
@@ -275,9 +275,9 @@ The checks protect:
 
 ## Artifacts
 
-- Production APK: `hrv-probe/hrv-probe.apk`
+- Production APK: `hrv/hrv.apk`
 - Raw captured fixture: `captures/raw_ppg.csv`
-- Analyzer: `hrv-probe/src/com/hrv/probe/HrvAnalyzer.java`
-- Regression checks: `hrv-probe/test/com/hrv/probe/HrvAnalyzerTest.java` and `hrv-probe/test/com/hrv/probe/HrvSamplesTest.java`
+- Analyzer: `hrv/src/com/hrv/hrv/HrvAnalyzer.java`
+- Regression checks: `hrv/test/com/hrv/hrv/HrvAnalyzerTest.java` and `hrv/test/com/hrv/hrv/HrvSamplesTest.java`
 - Debugging audit trail: `HYPOTHESES.csv`
 - Broader watch reverse-engineering findings: `PACE-FINDINGS.md`

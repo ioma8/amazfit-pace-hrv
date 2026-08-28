@@ -1,15 +1,15 @@
 package com.wifi.serve;
 
-import android.app.Activity;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Process;
 import android.os.Environment;
+import android.os.Handler;
 import android.util.Log;
 import android.view.View;
-import android.view.WindowManager;
 
 import com.google.zxing.common.BitMatrix;
+
+import com.hrv.common.ProbeActivity;
+import com.hrv.common.WavWriter;
 
 import java.io.File;
 import java.io.IOException;
@@ -21,12 +21,12 @@ import java.io.IOException;
  * it and joins. The watch detects the join through /proc/net/arp (fallback:
  * 15 s timer, or tap to toggle) and switches to phase 2: a QR of the served
  * URL. Scanning that opens the browser page that lists, downloads, and clears
- * the mic-probe recordings.
+ * the mic recordings.
  *
  * Lifecycle follows the repo convention: screen stays on while visible, back /
  * pause tears everything down (HTTP server, AP) and hard-kills the process.
  */
-public class MainActivity extends Activity {
+public class MainActivity extends ProbeActivity {
     private static final String TAG = "PaceSync";
     private static final int PORT = 8080;
     private static final long TICK_MS = 500;
@@ -79,7 +79,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        hardKillOnPause();
         startTime = System.currentTimeMillis();
 
         view = new MainView(this);
@@ -91,7 +91,7 @@ public class MainActivity extends Activity {
         });
         setContentView(view);
 
-        micDir = new File(Environment.getExternalStorageDirectory(), "mic-probe");
+        micDir = new File(Environment.getExternalStorageDirectory(), "mic");
         view.setFileCount(countRecordings());
         view.setStatus("AP starting");
 
@@ -155,7 +155,7 @@ public class MainActivity extends Activity {
         int n = 0;
         for (File f : all) {
             String name = f.getName();
-            if (f.isFile() && name.startsWith("mic_16000_") && name.endsWith(".wav")) {
+            if (f.isFile() && name.startsWith(WavWriter.MIC_PREFIX) && name.endsWith(".wav")) {
                 n++;
             }
         }
@@ -171,8 +171,7 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    protected void onPause() {
-        super.onPause();
+    protected void onExitCleanup() {
         stopAll();
     }
 
@@ -186,7 +185,5 @@ public class MainActivity extends Activity {
             server.stop();
         }
         ApManager.disable(this);
-        finish();
-        Process.killProcess(Process.myPid());
     }
 }

@@ -1,11 +1,11 @@
-# Seismo nebula (`seismo-probe/`) — how it works
+# Seismo nebula (`seismo/`) — how it works
 
 Live accelerometer-driven nebula for the Amazfit Pace: tilt steers the flow in
 all directions, twisting the watch around the screen axis swirls it. No shake
 reaction, no vibration. Screen stays on; the app hard-kills itself on pause
 (back/home/charging-UI takeover), per the repo's app conventions.
 
-Files: `seismo-probe/src/com/seismo/probe/NebulaView.java` (the effect),
+Files: `seismo/src/com/seismo/NebulaView.java` (the effect),
 `MainActivity.java` (sensor wiring).
 
 ## The effect: domain-warped fBm value noise

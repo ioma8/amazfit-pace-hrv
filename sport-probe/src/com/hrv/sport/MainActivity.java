@@ -1,6 +1,0 @@
-package com.hrv.sport;
-import android.app.*;import android.content.*;import android.hardware.*;import android.os.*;import android.util.*;import com.huami.watch.sensor.HmSensorManager;import java.util.*;
-public class MainActivity extends Activity{
- public void onCreate(Bundle b){super.onCreate(b);new Thread(new Runnable(){public void run(){go();finish();}}).start();}
- void go(){PowerManager.WakeLock w=((PowerManager)getSystemService(Context.POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"sport");w.acquire();try{HmSensorManager m=new HmSensorManager();int r=m.nativeConfigureSensorHubAlgorithm(0,Integer.valueOf(14));Log.i("SportRate","native ret="+r);Thread.sleep(2000);SensorManager sm=(SensorManager)getSystemService(Context.SENSOR_SERVICE);Sensor s=sm.getDefaultSensor(65538);final long[] f={0,0};SensorEventListener l=new SensorEventListener(){public void onSensorChanged(SensorEvent e){if(f[0]==0)f[0]=System.nanoTime();f[1]++;}public void onAccuracyChanged(Sensor s,int a){}};sm.registerListener(l,s,2000);Thread.sleep(20000);sm.unregisterListener(l);double rate=f[1]>1?(f[1]-1)/((System.nanoTime()-f[0])/1e9):0;Log.i("SportRate","n="+f[1]+" rate="+rate);m.nativeConfigureSensorHubAlgorithm(3,Integer.valueOf(14));}catch(Throwable t){Log.e("SportRate","ERR",t);}finally{w.release();}}
-}

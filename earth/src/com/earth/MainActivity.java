@@ -1,0 +1,85 @@
+package com.earth;
+
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
+import android.os.Bundle;
+import android.os.Handler;
+
+import com.hrv.common.ProbeActivity;
+
+/** Spinning Earth with a live day/night terminator driven by the real sun
+ *  position at the current location (GPS fix, fallback: Ostrava). */
+public class MainActivity extends ProbeActivity {
+    static final double DEFAULT_LAT = 49.82;
+    static final double DEFAULT_LON = 18.26;
+
+    private EarthView view;
+    private LocationManager lm;
+    private Handler h = new Handler();
+
+    @Override
+    protected void onCreate(Bundle state) {
+        super.onCreate(state);
+        hardKillOnPause();
+        setUrgentAudioPriority();
+        view = new EarthView(this);
+        setContentView(view);
+        saveAndMaxBrightness();
+        lm = (LocationManager) getSystemService(LOCATION_SERVICE);
+        Location last = null;
+        try {
+            last = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER);
+        } catch (SecurityException ignored) {
+        }
+        if (last != null) {
+            apply(last);
+        } else {
+            view.setLocation(DEFAULT_LAT, DEFAULT_LON, false);
+            requestFix();
+        }
+    }
+
+    private void requestFix() {
+        final Runnable timeout = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    lm.removeUpdates(listener);
+                } catch (SecurityException ignored) {
+                }
+            }
+        };
+        try {
+            lm.requestSingleUpdate(LocationManager.GPS_PROVIDER, listener,
+                    getMainLooper());
+            h.postDelayed(timeout, 25000);
+        } catch (SecurityException e) {
+            view.setLocation(DEFAULT_LAT, DEFAULT_LON, false);
+        }
+    }
+
+    private final LocationListener listener = new LocationListener() {
+        @Override
+        public void onLocationChanged(Location l) {
+            h.removeCallbacksAndMessages(null);
+            apply(l);
+        }
+
+        @Override
+        public void onStatusChanged(String p, int s, android.os.Bundle b) {
+        }
+
+        @Override
+        public void onProviderEnabled(String p) {
+        }
+
+        @Override
+        public void onProviderDisabled(String p) {
+        }
+    };
+
+    private void apply(Location l) {
+        view.setLocation(l.getLatitude(), l.getLongitude(), true);
+    }
+}

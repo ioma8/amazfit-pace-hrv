@@ -267,11 +267,11 @@ A third-party app can `SensorManager.getDefaultSensor(65538)` + `registerListene
 - **Limiter is signal quality, not hardware:** wrist PPG + motion ⇒ artifact rejection via the 500 Hz
   accelerometer is mandatory for anything beyond resting HRV.
 
-## 15. Empirical sensor probe (on-wrist, test APK `com.hrv.probe`)
+## 15. Empirical sensor probe (on-wrist, test APK `com.hrv.hrv`)
 
 Built a pure-Java MIPS APK (no NDK needed) that registers raw sensors and records `event.timestamp` + `values[]`,
 then ran it on-wrist. Log recovered via logcat (file lands app-private under
-`/storage/emulated/0/Android/data/com.hrv.probe/files/`, not shell-readable).
+`/storage/emulated/0/Android/data/com.hrv.hrv/files/`, not shell-readable).
 
 ### Results
 | Sensor (request) | register | events | vals/event | delivered rate | timestamps | ch0 values |
@@ -343,7 +343,7 @@ Result (watch worn, v5 probe):
   the proprietary hub blob) for an IBI or high-rate raw-PPG command. Uncertain payoff.
 
 ### Artifacts
-- Probe app v5 (`hrv-probe/`): hub-service binder calls with hand-built parcels + KLVP response dispatcher.
+- Probe app v5 (`hrv/`): hub-service binder calls with hand-built parcels + KLVP response dispatcher.
 - Ledger: `HYPOTHESES.csv` (5 hypotheses, 4 proved/disproved paths).
 
 

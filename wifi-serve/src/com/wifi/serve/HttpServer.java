@@ -1,5 +1,7 @@
 package com.wifi.serve;
 
+import com.hrv.common.WavWriter;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -22,7 +24,7 @@ import java.util.zip.ZipOutputStream;
  * Pure java.* so it compiles and runs on the host for tests.
  */
 public class HttpServer {
-    private static final String PREFIX = "mic_16000_";
+    private static final String PREFIX = WavWriter.MIC_PREFIX;
     private static final String SUFFIX = ".wav";
 
     private final File root;
@@ -224,13 +226,13 @@ public class HttpServer {
                 .append("</style></head><body>")
                 .append("<h1>Pace Sync</h1>")
                 .append("<p>").append(files.length).append(" recording").append(files.length == 1 ? "" : "s")
-                .append(" in /sdcard/mic-probe</p>")
+                .append(" in /sdcard/mic</p>")
                 .append("<a class=\"btn\" href=\"/all.zip\">Download all (.zip)</a>")
                 .append("<form method=\"post\" action=\"/clear\" style=\"display:inline\" onsubmit=\"return confirm('Delete all ")
                 .append(files.length).append(" recordings from the watch?')\">")
                 .append("<button class=\"btn danger\" type=\"submit\">Clear recordings</button></form>");
         if (files.length == 0) {
-            sb.append("<p class=\"empty\">No recordings found. Record with Mic Probe first.</p>");
+            sb.append("<p class=\"empty\">No recordings found. Record with Mic first.</p>");
         } else {
             sb.append("<ul>");
             for (File f : files) {

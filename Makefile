@@ -3,12 +3,14 @@
 APPS := $(patsubst %/,%,$(dir $(wildcard */AndroidManifest.xml)))
 APKS := $(addprefix apks/builds/,$(addsuffix .apk,$(APPS)))
 #   make                 build all apps
-#   make <app>           build one app, e.g. make tuner-probe
+#   make <app>           build one app, e.g. make tuner
 #   make clean           remove build outputs
 #
 # Toolchain: Android SDK from ANDROID_HOME, else ~/Library/Android/sdk.
-# The Huami watch API (com.huami.*) is vendored in hrv-probe/src and is put
-# on the classpath for every app so probes can use KlvpStream/HmSensorManager.
+# The Huami watch API (com.huami.*) is vendored in hrv/src; the shared
+# probe core (com.hrv.common: ProbeActivity, RoundView, WavWriter, Net, Fft,
+# SkyMath, Engine3d, ...) lives in common/src. Both are on every app's
+# classpath so probes can use them.
 
 SDK       ?= $(or $(ANDROID_HOME),$(HOME)/Library/Android/sdk)
 BT_VER    ?= 37.0.0
@@ -32,7 +34,7 @@ apks/builds/%.apk: FORCE
 	@mkdir -p apks/builds
 	cd $* && rm -rf obj dexout unsigned.apk && mkdir -p obj dexout
 	cd $* && "$(AAPT)" package -f -M AndroidManifest.xml -S res -I "$(AJ)" -F unsigned.apk -J obj
-	cd $* && CP="$(AJ):../hrv-probe/src"; for j in libs/*.jar; do [ -f "$$j" ] && CP="$$CP:$$j"; done; \
+	cd $* && CP="$(AJ):../hrv/src:../common/src"; for j in libs/*.jar; do [ -f "$$j" ] && CP="$$CP:$$j"; done; \
 		javac --release 8 -classpath "$$CP" -d obj $$(find src -name '*.java') obj/R.java
 	cd $* && "$(D8)" --lib "$(AJ)" --output dexout $$(find obj -name '*.class') $$(find libs -name '*.jar' 2>/dev/null)
 	cd $* && (cd dexout && zip -q -0 ../unsigned.apk classes.dex)

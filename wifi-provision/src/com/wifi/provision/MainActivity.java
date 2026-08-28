@@ -1,15 +1,14 @@
 package com.wifi.provision;
 
-import android.app.Activity;
 import android.content.Context;
 import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.Process;
 import android.util.Log;
-import android.view.WindowManager;
 import android.widget.TextView;
+
+import com.hrv.common.ProbeActivity;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -22,13 +21,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Reads /sdcard/wifi.json ({"ssid":..,"password":..} entries) and provisions the watch Wi-Fi. */
-public class MainActivity extends Activity {
+public class MainActivity extends ProbeActivity {
     private static final String TAG = "WifiProvision";
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        hardKillOnPause();
         TextView out = new TextView(this);
         out.setTextSize(12);
         out.setPadding(10, 10, 10, 10);
@@ -72,13 +71,6 @@ public class MainActivity extends Activity {
             log.append("error: ").append(t).append('\n');
         }
         out.setText(log.toString());
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-        finish();
-        Process.killProcess(Process.myPid());
     }
 
     private static final Pattern ENTRY = Pattern.compile(

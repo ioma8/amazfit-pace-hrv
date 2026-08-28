@@ -45,7 +45,7 @@ Concise digest of the recon + reverse-engineering sessions. Detailed logs: [`PAC
   sliding windows. It is bounded to **0–100** and withheld until 25 seconds; the saturating RMSSD curve is gone.
 - Pace HRV v1.2 owns LED, listener, handler thread, and wake lock in one cancellable session; immediate exit and
   fresh re-entry are device-verified. Samples use a 1,400-entry primitive ring and no application files are written.
-- Current app: `hrv-probe/`; evidence and limitations: [`HRV-FINDINGS.md`](HRV-FINDINGS.md); regression fixture:
+- Current app: `hrv/`; evidence and limitations: [`HRV-FINDINGS.md`](HRV-FINDINGS.md); regression fixture:
   `captures/raw_ppg.csv`.
 
 ## RE structure

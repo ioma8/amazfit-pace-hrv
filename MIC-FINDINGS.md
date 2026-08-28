@@ -34,7 +34,7 @@ The HAL does not resample to 11025/44100 — it re-labels the 16 kHz stream.
 
 ### Precise native-clock calibration
 
-`mic-clock-probe` recorded 32 seconds of untouched `MIC`/PCM16 while the host
+`mic-clock` recorded 32 seconds of untouched `MIC`/PCM16 while the host
 played four independently generated 48 kHz tones. Three two-second windows per
 tone produced:
 
@@ -50,7 +50,7 @@ residuals are below 0.002 cents; the clock error is only **-0.0105 cents**.
 The source WAV tones validate within 0.00001 cents. Clock drift therefore
 cannot explain tuner errors on the order of 15-20 cents.
 
-Probe output: `/sdcard/mic-clock-probe/capture.wav` (fixed 32-second raw
+Probe output: `/sdcard/mic-clock/capture.wav` (fixed 32-second raw
 capture, overwritten on each launch).
 
 ### 2. Speech capture (user talking, same run)
@@ -97,7 +97,7 @@ the full spectrum for dominant peaks when validating sample-rate clocks.**
 ## Capture app with UI (`com.hrv.mic`)
 
 Replaces the headless probe. Round-screen UI (320×300): live waveform, mm:ss
-duration, REC/STOP buttons, save status. Records at 16000 Hz (until STOP) and writes one raw WAV per capture to `/sdcard/mic-probe/`:
+duration, REC/STOP buttons, save status. Records at 16000 Hz (until STOP) and writes one raw WAV per capture to `/sdcard/mic/`:
 
 ```text
 mic_16000_<yyyyMMdd_HHmmss_SSS>_raw.wav   untouched capture
@@ -110,7 +110,7 @@ Source split:
 
 - `MainActivity.java` — lifecycle, AudioRecord loop, save orchestration
 - `MicView.java` — round-screen rendering + touch (unit-scaled like HrvView)
-- `WavStreamer.java` — streams PCM to the WAV on disk in real time (header re-patched every second, so an interrupted recording stays readable); on any self-exit the file is finalized (sizes patched + fsynced) before the activity closes
+- `WavWriter` (`common/src/com/hrv/common/`) — streams PCM to the WAV on disk in real time (header re-patched every second, so an interrupted recording stays readable); on any self-exit the file is finalized (sizes patched + fsynced) before the activity closes
 
 Lifecycle: back exits immediately; home/screen-off exits after a 3 s grace
 (`finish()`, no `killProcess` — the process stays alive so the notification
@@ -118,7 +118,7 @@ listener stays bound across sessions). While running, the screen is held
 awake (`FLAG_KEEP_SCREEN_ON` + `SCREEN_DIM_WAKE_LOCK`); a partial wakelock
 covers the capture itself.
 
-Build/install: `make mic-probe`, `adb install -r apks/builds/mic-probe.apk`.
+Build/install: `make mic`, `adb install -r apks/builds/mic.apk`.
 
 ## Speech DSP chain (validated on the 16 kHz speech capture)
 
@@ -149,21 +149,21 @@ HPF below 120 Hz (rumble not attenuated), LP at 4000 (dull sibilants).
 ## Pull workflow
 
 `pull-recordings.sh` (repo root) downloads every WAV from the device to
-`captures/mic-probe/` keeping the device file names (the app already stamps each
+`captures/mic/` keeping the device file names (the app already stamps each
 recording with its start time), then clears the device folder:
 
 ```bash
 ./pull-recordings.sh            # ADB_SERIAL=xxx for multiple devices
 ```
 
-Result: `captures/mic-probe/mic_16000_20260824_200859.wav`
+Result: `captures/mic/mic_16000_20260824_200859.wav`
 
 ## Artifacts
 
-- Capture app: `mic-probe/` (build script, APK output, source)
+- Capture app: `mic/` (build script, APK output, source)
 - Pull/download: `pull-recordings.sh`
 - Processed demo: `captures/mic_16000_processed_final.wav` (validated chain)
-- Captured fixtures: `captures/mic-probe/` (tone runs), `captures/mic-probe-noise/` (speech run)
+- Captured fixtures: `captures/mic/` (tone runs), `captures/mic-noise/` (speech run)
 - Audio HAL policy: `/system/etc/audio_policy.conf` declares `8000|16000|11025|44100`
   for the builtin mic — declaration ≠ reality; the hardware is 16000 only.
 
