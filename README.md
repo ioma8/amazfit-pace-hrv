@@ -327,8 +327,8 @@ adb shell am start -n com.hrv.mic/.MainActivity   # tap REC, speak, tap STOP
 ./pull-recordings.sh                                # downloads + clears device
 ```
 
-Back/home exits the app completely (hard kill), and the screen stays awake while
-it runs.
+Back exits immediately; home exits after a 3 s grace (process stays alive so
+the notification listener stays bound). The screen stays awake while it runs.
 
 Each pull creates `captures/mic-probe/mic_16000_<rec-time>.wav`
 — raw capture, keeping the on-device name.

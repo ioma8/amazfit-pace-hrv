@@ -34,7 +34,6 @@ public class MicView extends View {
 
     private final List<Float> wave = new ArrayList<Float>();
     private volatile boolean recording = false;
-    private volatile boolean processing = false;
     private volatile int seconds = 0;
     private volatile String status = "Ready";
     private final Handler anim = new Handler();
@@ -76,7 +75,6 @@ public class MicView extends View {
     @Override protected void onDetachedFromWindow() { super.onDetachedFromWindow(); anim.removeCallbacks(tick); }
 
     public void setRecording(boolean r) { recording = r; postInvalidate(); }
-    public void setProcessing(boolean p) { processing = p; postInvalidate(); }
     public void setStatus(String s) { status = s; postInvalidate(); }
     public void setSeconds(int s) { seconds = s; }
     public synchronized void pushWave(float v) { wave.add(v); if (wave.size() > 600) wave.remove(0); }
@@ -121,7 +119,7 @@ public class MicView extends View {
         canvas.drawText("duration", cx, cy + 38 * unit, textSmall);
 
         // status
-        int sc = recording ? Color.rgb(0, 220, 120) : (processing ? Color.rgb(230, 190, 60) : Color.rgb(140, 150, 160));
+        int sc = recording ? Color.rgb(0, 220, 120) : Color.rgb(140, 150, 160);
         textSmall.setColor(sc);
         textSmall.setTextSize(13 * unit);
         canvas.drawText(status, cx, cy + 58 * unit, textSmall);
@@ -129,18 +127,17 @@ public class MicView extends View {
         // buttons: centers 80u below center, 80u apart from center — fully inside the circle
         float by = cy + 80 * unit, r = 32 * unit;
         float rx = cx - 80 * unit, sx = cx + 80 * unit;
-        canvas.drawCircle(rx, by, r, recording || processing ? recBtnDim : recBtn);
+        canvas.drawCircle(rx, by, r, recording ? recBtnDim : recBtn);
         canvas.drawCircle(sx, by, r, recording ? stopBtn : stopBtnDim);
         btnText.setTextSize(16 * unit);
         btnTextDim.setTextSize(16 * unit);
-        if (recording || processing) { btnTextDim.setColor(Color.rgb(120, 120, 130)); canvas.drawText("REC", rx, by + 6 * unit, btnTextDim); }
+        if (recording) { btnTextDim.setColor(Color.rgb(120, 120, 130)); canvas.drawText("REC", rx, by + 6 * unit, btnTextDim); }
         else { btnText.setColor(Color.WHITE); canvas.drawText("REC", rx, by + 6 * unit, btnText); }
         if (recording) { btnText.setColor(Color.WHITE); canvas.drawText("STOP", sx, by + 6 * unit, btnText); }
         else { btnTextDim.setColor(Color.rgb(90, 90, 100)); canvas.drawText("STOP", sx, by + 6 * unit, btnTextDim); }
     }
 
     @Override public boolean onTouchEvent(MotionEvent e) {
-        if (processing) return true;
         if (e.getAction() == MotionEvent.ACTION_UP) {
             float unit = Math.min(getWidth(), getHeight()) / 300f;
             float cx = getWidth() / 2f, cy = getHeight() / 2f;

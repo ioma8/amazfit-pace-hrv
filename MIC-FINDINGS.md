@@ -110,12 +110,13 @@ Source split:
 
 - `MainActivity.java` — lifecycle, AudioRecord loop, save orchestration
 - `MicView.java` — round-screen rendering + touch (unit-scaled like HrvView)
-- `WavWriter.java` — 16 kHz mono PCM16 WAV writer
+- `WavStreamer.java` — streams PCM to the WAV on disk in real time (header re-patched every second, so an interrupted recording stays readable); on any self-exit the file is finalized (sizes patched + fsynced) before the activity closes
 
-Lifecycle: **back button or any pause (home, screen off) hard-kills the process**
-(`finish()` + `Process.killProcess`) — the probe never lingers as a paused
-zombie. While running, the screen is held awake (`FLAG_KEEP_SCREEN_ON` +
-`SCREEN_DIM_WAKE_LOCK`); a partial wakelock covers the capture itself.
+Lifecycle: back exits immediately; home/screen-off exits after a 3 s grace
+(`finish()`, no `killProcess` — the process stays alive so the notification
+listener stays bound across sessions). While running, the screen is held
+awake (`FLAG_KEEP_SCREEN_ON` + `SCREEN_DIM_WAKE_LOCK`); a partial wakelock
+covers the capture itself.
 
 Build/install: `make mic-probe`, `adb install -r apks/builds/mic-probe.apk`.
 
