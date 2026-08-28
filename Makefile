@@ -2,7 +2,7 @@
 # Build intermediates (obj/ dexout/ unsigned.apk) stay in each app dir.
 APPS := $(patsubst %/,%,$(dir $(wildcard */AndroidManifest.xml)))
 APKS := $(addprefix apks/builds/,$(addsuffix .apk,$(APPS)))
-#   make                 build all apps
+#   make                 build all apps (incremental: only changed ones)
 #   make <app>           build one app, e.g. make tuner
 #   make clean           remove build outputs
 #
@@ -29,7 +29,18 @@ all: $(APKS)
 $(APPS): %: apks/builds/%.apk
 	@echo "built: apks/builds/$@.apk"
 
-apks/builds/%.apk: FORCE
+# Incremental rebuild: an app's APK depends on its own manifest/res/src/libs
+# plus the shared classpath (common/src + the vendored com.huami API in
+# hrv/src) — a change to the shared pieces rebuilds every app, a change to an
+# app's own code rebuilds only that app. Deleting a source does not invalidate
+# the APK (make sees only remaining files); run `make clean` after deletions.
+SHARED_DEPS := $(shell find common/src hrv/src/com/huami -type f -name '*.java' 2>/dev/null)
+app_deps = $(wildcard $*/AndroidManifest.xml) \
+           $(shell find $*/src $*/res -type f 2>/dev/null) \
+           $(wildcard $*/libs/*.jar)
+
+.SECONDEXPANSION:
+apks/builds/%.apk: $$(app_deps) $(SHARED_DEPS)
 	@echo "== $* =="
 	@mkdir -p apks/builds
 	cd $* && rm -rf obj dexout unsigned.apk && mkdir -p obj dexout
@@ -40,8 +51,6 @@ apks/builds/%.apk: FORCE
 	cd $* && (cd dexout && zip -q -0 ../unsigned.apk classes.dex)
 	cd $* && "$(ZIPALIGN)" -f 4 unsigned.apk ../apks/builds/$*.apk
 	cd $* && "$(APKSIGNER)" sign --ks "$(KEYSTORE)" --ks-pass pass:android --ks-key-alias androiddebugkey ../apks/builds/$*.apk
-
-FORCE:
 
 clean:
 	rm -rf $(foreach a,$(APPS),$(a)/obj $(a)/dexout $(a)/unsigned.apk $(a)/aligned.apk)

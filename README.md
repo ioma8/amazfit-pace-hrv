@@ -29,7 +29,7 @@ Rootless watch apps and sensor research for the Amazfit Pace A1612 (Android 5.1,
 Prereqs: JDK 8+, Android SDK platform 36 + Build Tools 37.0.0, `adb`, `zip` (`ANDROID_HOME` or `~/Library/Android/sdk`). Debug keystore at `~/.android/debug.keystore` (create once with `keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -dname 'CN=Android Debug,O=Android,C=US' -keyalg RSA -validity 10000`).
 
 ```bash
-make                 # build all apps -> signed APKs in apks/builds/
+make                 # build all apps (incremental: only changed) -> signed APKs in apks/builds/
 make hrv             # build one app (any app dir name works)
 make clean
 
