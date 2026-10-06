@@ -7,4 +7,7 @@ apks/builds/
 *.zip
 captures/*
 
+# native build output (rebuilt from jni/)
+doom/lib/
+
 .DS_Store

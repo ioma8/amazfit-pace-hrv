@@ -1,6 +1,6 @@
 # Amazfit Pace HRV
 
-Rootless watch apps and sensor research for the Amazfit Pace A1612 (Android 5.1, MIPS32, 320×300 round @238 dpi). No root, no dependencies; pure Java, one Makefile, host-testable logic.
+Rootless watch apps and sensor research for the Amazfit Pace A1612 (Android 5.1, MIPS32, 320×300 round @238 dpi). No root, no dependencies; pure Java bar one native app, one Makefile, host-testable logic.
 
 ## Apps
 
@@ -23,10 +23,13 @@ Rootless watch apps and sensor research for the Amazfit Pace A1612 (Android 5.1,
 | wifi-serve | "Pace Sync": AP + QR, serves mic recordings over HTTP | com.wifi.serve |
 | wifi-provision | adds Wi-Fi networks from `/sdcard/wifi.json` | com.wifi.provision |
 | filebrowser | sdcard file browser (text/image viewer) | com.hrv.files |
+| doom | Doom / Freedoom (doomgeneric, native MIPS) + touch controls | com.doom |
 
 ## Build & install
 
 Prereqs: JDK 8+, Android SDK platform 36 + Build Tools 37.0.0, `adb`, `zip` (`ANDROID_HOME` or `~/Library/Android/sdk`). Debug keystore at `~/.android/debug.keystore` (create once with `keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -dname 'CN=Android Debug,O=Android,C=US' -keyalg RSA -validity 10000`).
+
+`doom` also needs a MIPS compiler — NDK **16.1.4479499** (r16b) is the last one with a MIPS toolchain, installed once with `sdkmanager "ndk;16.1.4479499"`. Everything else stays NDK-free.
 
 ```bash
 make                 # build all apps (incremental: only changed) -> signed APKs in apks/builds/
@@ -68,6 +71,43 @@ make wifi-serve && adb install -r apks/builds/wifi-serve.apk
 ```
 
 iOS cameras don't parse `WIFI:` QRs (third-party QR app needed). Run on the cradle — AP + screen-on drains the battery.
+
+## Doom (`doom`)
+
+Upstream [doomgeneric](https://github.com/ozkl/doomgeneric) sources vendored in `doom/jni/`, cross-compiled to `lib/mips/libdoom.so` by `doom/jni/Makefile` (no NDK in the rest of the repo). It renders 320×200 and the view scales it 0.8 into the round panel with translucent controls in the corners. One vendored file, `i_system.c`, carries a marked `LOCAL CHANGE` for Android (I_Error logs to logcat instead of shelling out to the desktop `zenity` dialog); the rest of the tree is byte-identical to upstream.
+
+- Ships **Freedoom Phase 1** (0.13.0, BSD — `doom/assets/freedoom1.wad`, four episodes). Doom reads a real file path and writes its config/savegames next to it, so the WAD is unpacked once into the app's files dir on first launch (~29 MB, a `.part` file then a rename so a kill mid-copy cannot leave a truncated IWAD).
+- The controls: left cluster `← ↑ ↓ →`, `FIRE` and `USE` right, `ESC`/`ENT`/`RUN` top. `RUN` is hold-to-sprint; menus need `ENT` (Doom ignores USE there). Multi-touch, so move and fire together work.
+- No sound (no usable `AudioTrack` path on this ROM anyway), no brightness override, back exits.
+
+### Replacing the WAD
+
+A WAD directly on `/sdcard` wins over the bundled one. **Keep the canonical file name** — Doom picks the game from the name when it recognises it, and only falls back to the lumps otherwise:
+
+| name | game | must contain |
+|---|---|---|
+| `freedoom1.wad`, `doom.wad`, `doom1.wad` | Doom 1 | `E1M1` |
+| `freedoom2.wad`, `doom2.wad` | Doom 2 | `MAP01` |
+
+A name that disagrees with the contents makes the engine abort, and its error path calls `exit()` — the app would just vanish. So `WadFile` checks the file is an IWAD holding the map that name implies *before* the engine sees it, and falls back to the bundled Freedoom with a logcat line if it is not (`adb logcat -s doom`). Saves live in one directory, so clear the app's `files/` if Doom complains after switching WADs.
+
+```bash
+make doom && adb install -r apks/builds/doom.apk
+```
+
+The APK carries two ABIs built from the same sources: `lib/mips` for the watch and
+`lib/arm64-v8a` so the same APK runs on the [`pace` AVD](EMULATOR.md), which has
+the watch's 320×300@238 dpi panel but no MIPS backend. `make -C doom/jni ABI=mips`
+(or `make clean && make ABI=mips`) keeps a watch-only build. Emulator playbook and
+the full validation table: [`EMULATOR.md`](EMULATOR.md).
+
+### Host checks (no watch needed)
+
+```bash
+./doom/test/run.sh
+```
+
+That runs three suites: `WadFileTest` (the shipped WAD is bootable; misnamed, truncated and junk WADs are rejected — this is the regression check for the trap above), `LayoutCheck` (every control rect fits the r=152 lit circle, parsed out of `DoomView.java` so there is one copy of them) and `host-smoke` (the real engine plus the shipped WAD, using the same argv as the APK, renders 1000 frames; it prints `Ultimate Doom`, i.e. all four episodes).
 
 ## App conventions
 

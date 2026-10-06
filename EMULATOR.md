@@ -10,7 +10,7 @@ this machine (macOS, Apple Silicon).
 |---|---|---|
 | Android | 5.1 (API 22) | 7.0 (API 24) |
 | Screen | 320×300 round @ 238 dpi | 320×300 @ 238 dpi (square), fullscreen, no bars |
-| RAM | 477 MB | 1536 MB |
+| RAM | 477 MB | 1024 MB — the emulator raises anything lower (`Increasing RAM size to 1024MB`), so the watch's 477 MB cannot be reproduced |
 | CPU | MIPS32r1 XBurst | arm64 (4 vCPU) |
 | WiFi | real (client + AP) | **none at API 24** — AP mode untestable |
 | Root | none (uid 2000) | adb root available (unused) |
@@ -67,7 +67,7 @@ avd.ini.encoding = UTF-8
 abi.type = arm64-v8a
 hw.cpu.arch = arm64
 hw.cpu.ncore = 4
-hw.ramSize = 1536
+hw.ramSize = 1024
 hw.lcd.width = 320
 hw.lcd.height = 300
 hw.lcd.density = 238
@@ -200,6 +200,46 @@ $ADB logcat -d | grep -E 'FATAL.*wifi|AndroidRuntime'  # nothing from the app
 A `BatteryService` FATAL in logcat dated at boot time is a known API 24 arm64
 quirk of the emulator itself — ignore it.
 
+## Validating Doom (playbook)
+
+`doom` is the one app that is not pure Java: it ships `lib/mips/libdoom.so` for the
+watch and `lib/arm64-v8a/libdoom.so` for this emulator, built from the same
+sources by `doom/jni/Makefile` (`make -C doom/jni` builds both). The emulator has
+**no MIPS backend** — its QEMU guests are only `aarch64`/`armel` — and the only
+MIPS system images are API 16/17, below the app's `minSdkVersion 22`. So the
+emulator validates everything *except* the MIPS instruction encoding itself,
+which is covered by the ELF/linker evidence and by `host-smoke` instead.
+
+```bash
+export ANDROID_SDK_ROOT=${ANDROID_HOME:-$HOME/Library/Android/sdk}
+"$ANDROID_SDK_ROOT/emulator/emulator" -avd pace -scale 2 \
+  -gpu swiftshader_indirect -prop qemu.hw.mainkeys=1 &
+
+ADB="$ANDROID_SDK_ROOT/platform-tools/adb"
+make doom
+$ADB install -r apks/builds/doom.apk
+$ADB shell am start -n com.doom/.MainActivity
+$ADB logcat -s doom                  # unpacked ... -> doomgeneric starting
+```
+
+Observed on this AVD (2026-10-06):
+
+| Check | Result |
+|---|---|
+| process alive, no app crash | pid present after 12 s; the crash buffer holds only the emulator's own boot-time `BatteryService` NPE |
+| IWAD fallback + unpack | `no usable IWAD on /sdcard, falling back to freedoom1.wad` then `unpacked ... /data/user/0/com.doom/files/freedoom1.wad` |
+| framebuffer geometry | black bars top (`y0-28`) and bottom; the game exactly `32,80`–`288,240`; controls exactly on their rects |
+| engine live | 36% of the game rect changed per 4 s, and the change bbox was the game rect only |
+| touch → native | `adb shell input tap 110 51` was dequeued by the engine as `key=27`; `tap 160 51` as `key=13` |
+| menu → playable level | ESC then ENTER ×3 logged `G_DoLoadLevel map=1` (E1M1) — a real game starts |
+| memory | ~27 MB PSS, ~20 MB of it native heap (the 16 MB Doom zone), so it fits the watch's 477 MB |
+| frame pacing | 50th/90th percentile 5 ms, 1.7% janky — **emulator only**; a native arm64 build on an M-series host says nothing about the 1 GHz MIPS watch |
+
+Drive it from the on-screen `ESC`/`ENT` buttons (the watch has no keys). While a
+game runs the world keeps simulating behind the menu — Doom's ESC does not pause,
+only the PAUSE key does — so "the picture is still moving" is not evidence that
+input failed.
+
 ## What cannot be validated on the emulator
 
 - **AP mode** — no WiFi hardware at API 24. The app's status line will read
@@ -207,6 +247,13 @@ quirk of the emulator itself — ignore it.
   path is not.
 - **Phone scan/join/browse flow** — needs a real phone + real AP.
 - **Mic capture** — audio input is disabled (`hw.audioInput = no`).
+- **MIPS code execution** — no MIPS QEMU backend on an arm64 host, and no MIPS
+  image above API 17. `doom` therefore runs here as an arm64 build; the watch
+  loads the MIPS one. See the Doom playbook above for what that leaves unproven.
+- **Anything timing-sensitive** — the emulator runs the guest natively on a much
+  faster CPU, so a comfortable result here says nothing about the 1 GHz watch
+  (the seismo/nebula work needed a URGENT_AUDIO render thread precisely because
+  the real core is slow).
 
 These remain on-device tests for the watch.
 

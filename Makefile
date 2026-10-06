@@ -11,6 +11,8 @@ APKS := $(addprefix apks/builds/,$(addsuffix .apk,$(APPS)))
 # probe core (com.hrv.common: ProbeActivity, RoundView, WavWriter, Net, Fft,
 # SkyMath, Engine3d, ...) lives in common/src. Both are on every app's
 # classpath so probes can use them.
+# An app that has jni/Makefile gets its native libs cross-compiled there and
+# packaged as lib/mips/*.so (only doom so far).
 
 SDK       ?= $(or $(ANDROID_HOME),$(HOME)/Library/Android/sdk)
 BT_VER    ?= 37.0.0
@@ -36,7 +38,7 @@ $(APPS): %: apks/builds/%.apk
 # the APK (make sees only remaining files); run `make clean` after deletions.
 SHARED_DEPS := $(shell find common/src hrv/src/com/huami -type f -name '*.java' 2>/dev/null)
 app_deps = $(wildcard $*/AndroidManifest.xml) \
-           $(shell find $*/src $*/res -type f 2>/dev/null) \
+           $(shell find $*/src $*/res $*/jni $*/assets -type f 2>/dev/null) \
            $(wildcard $*/libs/*.jar)
 
 .SECONDEXPANSION:
@@ -44,14 +46,17 @@ apks/builds/%.apk: $$(app_deps) $(SHARED_DEPS)
 	@echo "== $* =="
 	@mkdir -p apks/builds
 	cd $* && rm -rf obj dexout unsigned.apk && mkdir -p obj dexout
-	cd $* && "$(AAPT)" package -f -M AndroidManifest.xml -S res -I "$(AJ)" -F unsigned.apk -J obj
+	cd $* && "$(AAPT)" package -f -M AndroidManifest.xml -S res $(if $(wildcard $*/assets),-A assets) -I "$(AJ)" -F unsigned.apk -J obj
 	cd $* && CP="$(AJ):../hrv/src:../common/src"; for j in libs/*.jar; do [ -f "$$j" ] && CP="$$CP:$$j"; done; \
 		javac --release 8 -classpath "$$CP" -d obj $$(find src -name '*.java') obj/R.java
 	cd $* && "$(D8)" --lib "$(AJ)" --output dexout $$(find obj -name '*.class') $$(find libs -name '*.jar' 2>/dev/null)
 	cd $* && (cd dexout && zip -q -0 ../unsigned.apk classes.dex)
+	@if [ -f $*/jni/Makefile ]; then $(MAKE) -C $*/jni; fi
+	cd $* && if [ -d lib ]; then zip -q -0 -r unsigned.apk lib; fi
 	cd $* && "$(ZIPALIGN)" -f 4 unsigned.apk ../apks/builds/$*.apk
 	cd $* && "$(APKSIGNER)" sign --ks "$(KEYSTORE)" --ks-pass pass:android --ks-key-alias androiddebugkey ../apks/builds/$*.apk
 
 clean:
 	rm -rf $(foreach a,$(APPS),$(a)/obj $(a)/dexout $(a)/unsigned.apk $(a)/aligned.apk)
 	rm -f $(foreach a,$(APPS),apks/builds/$(a).apk) apks/*.apk
+	@for d in $(APPS); do if [ -f $$d/jni/Makefile ]; then $(MAKE) -C $$d/jni clean; fi; done
