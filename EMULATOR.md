@@ -233,12 +233,15 @@ Observed on this AVD (2026-10-06):
 | touch → native | `adb shell input tap 110 51` was dequeued by the engine as `key=27`; `tap 160 51` as `key=13` |
 | menu → playable level | ESC then ENTER ×3 logged `G_DoLoadLevel map=1` (E1M1) — a real game starts |
 | memory | ~27 MB PSS, ~20 MB of it native heap (the 16 MB Doom zone), so it fits the watch's 477 MB |
+| fps readout | 69–70 fps, verified against a temporary log of the same counter (the pixels and the computed value agreed); refreshes twice a second |
 | frame pacing | 50th/90th percentile 5 ms, 1.7% janky — **emulator only**; a native arm64 build on an M-series host says nothing about the 1 GHz MIPS watch |
 
-Drive it from the on-screen `ESC`/`ENT` buttons (the watch has no keys). While a
-game runs the world keeps simulating behind the menu — Doom's ESC does not pause,
-only the PAUSE key does — so "the picture is still moving" is not evidence that
-input failed.
+Drive it from the on-screen `ESC`/`ENT` buttons (the watch has no keys). The game
+renders an FPS readout above the top buttons — tap it to hide it; on this AVD it
+holds ~70 fps, which is a baseline for "the port is not the bottleneck", not a
+prediction for the watch. While a game runs the world keeps simulating behind the
+menu — Doom's ESC does not pause, only the PAUSE key does — so "the picture is
+still moving" is not evidence that input failed.
 
 ## MIPS probe (legacy emulator, proven)
 

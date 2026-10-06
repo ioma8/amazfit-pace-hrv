@@ -33,6 +33,9 @@ public class DoomView extends View {
 
     public static native void nativeStart(String wadPath, Bitmap fb, DoomView view);
 
+    /** Doom's own frames per second, measured by the native render loop. */
+    public static native int nativeFps();
+
     /** pressed: 1 = key down, 0 = key up. Called from the touch handler. */
     public static native void nativeKey(int pressed, int key);
 
@@ -51,6 +54,12 @@ public class DoomView extends View {
     /** Game area: 320x200 scaled 0.8, corners still inside the circle. */
     private static final Rect FB_SRC = new Rect(0, 0, FB_W, FB_H);
     private static final Rect FB_DST = new Rect(32, 80, 288, 240);
+
+    /* FPS readout. The only lit space that covers neither the game nor a button
+       is the sliver above the top row, so it hugs the circle's top edge: 64x19
+       at (128,12) keeps every corner inside r=152 (LayoutCheck asserts it), and
+       "60fps" at 14 px is ~42 px wide, so it fits. Tap it to hide it again. */
+    private static final Rect FPS_RECT = new Rect(128, 12, 192, 31);
 
     /* Menus only react to ENTER, so it gets its own button; RUN is hold. */
     private static final Btn[] BUTTONS = {
@@ -72,6 +81,8 @@ public class DoomView extends View {
     private final Paint blit = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final Paint btnPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint fpsPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private boolean showFps = true;
 
     public DoomView(Context c, final String wadPath) {
         super(c);
@@ -81,6 +92,9 @@ public class DoomView extends View {
         textPaint.setColor(Color.argb(220, 255, 255, 255));
         textPaint.setTextSize(16);
         textPaint.setTextAlign(Paint.Align.CENTER);
+        fpsPaint.setColor(Color.argb(230, 255, 235, 120));
+        fpsPaint.setTextSize(14);
+        fpsPaint.setTextAlign(Paint.Align.CENTER);
         setBackgroundColor(Color.BLACK);
         new Thread(new Runnable() {
             @Override public void run() {
@@ -100,12 +114,22 @@ public class DoomView extends View {
             c.drawText(b.text, b.rect.centerX(),
                     b.rect.centerY() - (textPaint.ascent() + textPaint.descent()) / 2, textPaint);
         }
+        if (showFps) {
+            String label = nativeFps() + "fps";
+            c.drawText(label, FPS_RECT.centerX(),
+                    FPS_RECT.centerY() - (fpsPaint.ascent() + fpsPaint.descent()) / 2, fpsPaint);
+        }
     }
 
     @Override public boolean onTouchEvent(MotionEvent ev) {
         int action = ev.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
             int i = ev.getActionIndex();
+            if (FPS_RECT.contains((int) ev.getX(i), (int) ev.getY(i))) {
+                showFps = !showFps;
+                postInvalidate();
+                return true;
+            }
             int key = keyAt(ev.getX(i), ev.getY(i));
             if (key != 0) {
                 held.put(ev.getPointerId(i), key);

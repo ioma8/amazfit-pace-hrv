@@ -27,6 +27,8 @@ public final class LayoutCheck {
 
     private static final Pattern GAME = Pattern.compile(
             "FB_DST = new Rect\\((\\d+),\\s*(\\d+),\\s*(\\d+),\\s*(\\d+)\\)");
+    private static final Pattern FPS = Pattern.compile(
+            "FPS_RECT = new Rect\\((\\d+),\\s*(\\d+),\\s*(\\d+),\\s*(\\d+)\\)");
     private static final Pattern BTN = Pattern.compile(
             "new Btn\\((\\d+),\\s*(\\d+),\\s*(\\d+),\\s*(\\d+),\\s*(\\w+),\\s*\"([^\"]*)\"\\)");
 
@@ -37,11 +39,14 @@ public final class LayoutCheck {
         String text = read(src);
 
         int[] game = first(GAME, text, "FB_DST");
+        int[] fps = first(FPS, text, "FPS_RECT");
         List<int[]> buttons = all(BTN, text);
         check("all 9 controls parsed out of DoomView.java, found " + buttons.size(),
                 buttons.size() >= 9);
 
         check("game rect is inside the lit circle", inside(game));
+        check("fps readout " + rect(fps) + " is inside the lit circle", inside(fps));
+        check("fps readout is not covered by a control", !hitsAny(fps, buttons));
         for (int i = 0; i < buttons.size(); i++) {
             final int[] r = buttons.get(i);
             check("control " + i + " " + rect(r) + " is inside the lit circle", inside(r));
@@ -60,6 +65,15 @@ public final class LayoutCheck {
     /** Controls may sit over the game (translucent by design) but not each other. */
     private static boolean overlaps(int[] a, int[] b) {
         return a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    }
+
+    private static boolean hitsAny(int[] r, List<int[]> others) {
+        for (int[] o : others) {
+            if (overlaps(r, o)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean onPanel(int[] r) {

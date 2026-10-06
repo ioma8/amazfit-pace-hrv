@@ -31,6 +31,14 @@ static jobject s_view;
 static jmethodID s_postInvalidate;
 static uint32_t s_origin_ms;
 
+/* Doom frames per second, for the overlay. DG_DrawFrame runs once per rendered
+ * frame, so this is the engine's rate, not the UI thread's. Volatile because the
+ * Java side reads it from another thread. */
+static volatile int s_fps;
+static uint32_t s_fps_count;
+static uint32_t s_fps_window_ms;
+#define FPS_WINDOW_MS 500
+
 static uint32_t nowMs(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -40,11 +48,26 @@ static uint32_t nowMs(void) {
 void DG_Init(void) {
     memset(s_KeyQueue, 0, sizeof(s_KeyQueue));
     s_origin_ms = nowMs();
+    s_fps_window_ms = s_origin_ms;
 }
 
 void DG_DrawFrame(void) {
     AndroidBitmapInfo info;
     void *pixels;
+
+    {
+        /* Divide by the real elapsed time, so the reading is exact rather than
+         * a multiple of the window. */
+        uint32_t now = nowMs();
+        uint32_t elapsed = now - s_fps_window_ms;
+        s_fps_count++;
+        if (elapsed >= FPS_WINDOW_MS) {
+            s_fps = (int)(s_fps_count * 1000u / elapsed);
+            s_fps_count = 0;
+            s_fps_window_ms = now;
+        }
+    }
+
     if (AndroidBitmap_getInfo(s_env, s_fb, &info) == ANDROID_BITMAP_RESULT_SUCCESS
             && AndroidBitmap_lockPixels(s_env, s_fb, &pixels) == ANDROID_BITMAP_RESULT_SUCCESS) {
         const uint32_t *src = (const uint32_t *)DG_ScreenBuffer;
@@ -87,6 +110,13 @@ int DG_GetKey(int *pressed, unsigned char *doomKey) {
 
 void DG_SetWindowTitle(const char *title) {
     (void)title;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_doom_DoomView_nativeFps(JNIEnv *env, jclass cls) {
+    (void)env;
+    (void)cls;
+    return s_fps;
 }
 
 JNIEXPORT void JNICALL

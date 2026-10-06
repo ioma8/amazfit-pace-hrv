@@ -78,6 +78,7 @@ Upstream [doomgeneric](https://github.com/ozkl/doomgeneric) sources vendored in 
 
 - Ships **Freedoom Phase 1** (0.13.0, BSD — `doom/assets/freedoom1.wad`, four episodes). Doom reads a real file path and writes its config/savegames next to it, so the WAD is unpacked once into the app's files dir on first launch (~29 MB, a `.part` file then a rename so a kill mid-copy cannot leave a truncated IWAD).
 - The controls: left cluster `← ↑ ↓ →`, `FIRE` and `USE` right, `ESC`/`ENT`/`RUN` top. `RUN` is hold-to-sprint; menus need `ENT` (Doom ignores USE there). Multi-touch, so move and fire together work.
+- An **FPS readout** sits in the sliver above the top buttons (the only lit space that covers neither the game nor a control) showing Doom's own frame rate — it counts rendered frames in the native loop, not UI redraws, and refreshes twice a second. That is the number to read on hardware. Tap it to hide it again, so measuring does not need a rebuild.
 - No sound (no usable `AudioTrack` path on this ROM anyway), no brightness override, back exits.
 
 ### Replacing the WAD
