@@ -5,8 +5,9 @@
 #   arm64-v8a   the repo's `pace` AVD (and any modern device), for on-emulator
 #               validation; the emulator has no MIPS backend
 #
-# Both ABIs are built by default; the root Makefile packages whatever ends up in
-# lib/. Held to one ABI (a watch-only APK) with:  make clean && make ABI=mips
+# Both ABIs are built by default — the root Makefile packages whatever lands in
+# lib/. For a watch-only APK, drop $(ARM64_OUT) from `all:` below (that is the
+# only place the arm64 build is wired in).
 #
 #   make -C doom/jni host-smoke WAD=../assets/freedoom1.wad
 # builds the engine for the *host* instead and renders 1000 frames.

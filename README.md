@@ -96,10 +96,11 @@ make doom && adb install -r apks/builds/doom.apk
 ```
 
 The APK carries two ABIs built from the same sources: `lib/mips` for the watch and
-`lib/arm64-v8a` so the same APK runs on the [`pace` AVD](EMULATOR.md), which has
-the watch's 320×300@238 dpi panel but no MIPS backend. `make -C doom/jni ABI=mips`
-(or `make clean && make ABI=mips`) keeps a watch-only build. Emulator playbook and
-the full validation table: [`EMULATOR.md`](EMULATOR.md).
+`lib/arm64-v8a` so the same APK also runs on the [`pace` AVD](EMULATOR.md) — the
+watch's 320×300@238 dpi panel, but the emulator has no MIPS backend. That second
+lib is 0.6 MB of the 11.5 MB APK; for a watch-only build, drop `$(ARM64_OUT)`
+from `all:` in `doom/jni/Makefile`. Emulator playbook and the full validation
+table: [`EMULATOR.md`](EMULATOR.md).
 
 ### Host checks (no watch needed)
 
