@@ -301,6 +301,12 @@ API 22 watch. What this still does not measure is speed: a TCG guest inside
 Rosetta is orders of magnitude slower than the watch's 1 GHz XBurst, so watch
 framerate remains unknown pending hardware.
 
+One caveat for reproducing it: this path is flaky under Rosetta — after roughly
+fifteen minutes of emulation the process died with
+`rosetta error: unexpectedly got a signal in sigtramp` (a Rosetta signal-trampoline
+fault in that 2016 binary, not anything in the app). Take your evidence early; a
+re-run just means booting it again, the `mips17` AVD survives.
+
 ## What cannot be validated on the emulator
 
 - **AP mode** — no WiFi hardware at API 24. The app's status line will read
