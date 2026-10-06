@@ -240,6 +240,67 @@ game runs the world keeps simulating behind the menu — Doom's ESC does not pau
 only the PAUSE key does — so "the picture is still moving" is not evidence that
 input failed.
 
+## MIPS probe (legacy emulator, proven)
+
+The shipped `lib/mips/libdoom.so` had never executed on MIPS — no MIPS backend ships
+with the current emulator and no MIPS system image exists above API 17. It *can*
+be run, though, with Google's legacy emulator (25.2.5, still hosted) whose
+`tools/qemu/darwin-x86_64/qemu-system-mipsel` is an x86_64 binary that runs under
+Rosetta 2 on Apple Silicon. Caveat up front: the guest is **Android 4.2/API 17**,
+so this proves the MIPS code executes, not that it behaves like the watch's 5.1.
+
+```bash
+# 1. legacy emulator (200 MB; extract somewhere durable, e.g. ~/android-legacy)
+curl -o /tmp/tools.zip https://dl.google.com/android/repository/tools_r25.2.5-macosx.zip
+mkdir -p ~/android-legacy && (cd ~/android-legacy && unzip -q /tmp/tools.zip 'tools/*')
+
+# 2. the only MIPS image there is, plus an AVD with the watch's panel geometry
+sdkmanager "system-images;android-17;default;mips"
+echo no | avdmanager create avd -n mips17 -k "system-images;android-17;default;mips" --force
+cat >> ~/.android/avd/mips17.avd/config.ini <<'INI'
+hw.lcd.width = 320
+hw.lcd.height = 300
+hw.lcd.density = 238
+skin.name = 320x300
+skin.path = _no_skin
+hw.ramSize = 477
+INI
+
+# 3. boot (Qt dylibs must be on DYLD_LIBRARY_PATH; ANDROID_SDK_ROOT must be exported)
+ANDROID_SDK_ROOT=$HOME/Library/Android/sdk \
+DYLD_LIBRARY_PATH=$HOME/android-legacy/tools/lib64/qt/lib \
+  ~/android-legacy/tools/emulator64-mips -avd mips17 -no-window -no-audio \
+  -no-snapshot -no-boot-anim -gpu off &
+```
+
+For this probe only, the app needs four throwaway edits (the shipped config is
+`minSdkVersion 22` and API 21+): `minSdkVersion 22` → `17` in the manifest;
+`Theme.Material.NoActionBar` → `Theme.Holo.NoActionBar` in `res/values/styles.xml`
+(`Theme.Material` is API 21+); the MIPS sysroot in `doom/jni/Makefile` from
+`platforms/android-21` to `android-17` and `D__ANDROID_API__=17`; and
+`MainActivity.unpack`'s try-with-resources rewritten as try/finally, because
+`AutoCloseable` is API 19. Then `make doom`, `adb install -r`, and
+`adb shell am start -n com.doom/.MainActivity`. `git checkout -- <those files>`
+afterwards. Note `/sdcard` is not mounted on this AVD, so the app takes its
+"no usable IWAD on /sdcard" fallback — which incidentally exercises WadFile.
+
+Result (2026-10-06), the answers we could not get any other way:
+
+```
+D/dalvikvm: Added shared lib /data/app-lib/com.doom-1/libdoom.so   <- MIPS .so loads
+I/doom: no usable IWAD on /sdcard, falling back to freedoom1.wad
+I/doom: unpacked freedoom1.wad to /data/data/com.doom/files/freedoom1.wad
+I/doom: doomgeneric starting, iwad=/data/data/com.doom/files/freedoom1.wad
+```
+
+No `UnsatisfiedLinkError`, no crash, process alive at ~18% guest CPU; the screen
+shows the game in its rect and 36% of it changed over 20 s (animating). The MIPS
+build also links against the **android-17** stubs, so it needs nothing newer than
+API 17 — the shipped android-21 build therefore has no symbol-version risk on the
+API 22 watch. What this still does not measure is speed: a TCG guest inside
+Rosetta is orders of magnitude slower than the watch's 1 GHz XBurst, so watch
+framerate remains unknown pending hardware.
+
 ## What cannot be validated on the emulator
 
 - **AP mode** — no WiFi hardware at API 24. The app's status line will read
